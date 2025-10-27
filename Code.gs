@@ -144,7 +144,8 @@ function Build_FairUsage_ForYear() {
     const inactive = revenue <= 0;
 
     // still look up tech fee, but inactive accounts won't get allocations
-    const techFee = techByAccount.get(r.account.toLowerCase()) || 0;
+    const accountKey = r.account.toLowerCase();
+    const techFee = techByAccount.get(accountKey) || 0;
     const paying  = techFee > 0;
 
     // If inactive, force to "Inactive" with zero base/ceiling
@@ -152,6 +153,11 @@ function Build_FairUsage_ForYear() {
 
     const bandName = cfg.marketBands[r.market] || 'Low';
     const regionMult = cfg.regionalBands[bandName] != null ? cfg.regionalBands[bandName] : 1.00;
+
+    const siteSize = cfg.accountSiteSizes[accountKey] || 'Default';
+    const siteMultiplier = cfg.siteSizeMultipliers && cfg.siteSizeMultipliers.hasOwnProperty(siteSize)
+      ? cfg.siteSizeMultipliers[siteSize]
+      : (cfg.siteSizeMultipliers && cfg.siteSizeMultipliers.Default != null ? cfg.siteSizeMultipliers.Default : 1);
 
     return {
       account: r.account,
@@ -164,7 +170,9 @@ function Build_FairUsage_ForYear() {
       tierBase: tierObj.base,
       tierCeiling: tierObj.ceiling,
       regionBandName: bandName,
-      regionMult
+      regionMult,
+      siteSize,
+      siteMultiplier: isFinite(siteMultiplier) ? siteMultiplier : 1
     };
   });
 
@@ -290,7 +298,9 @@ function Build_FairUsage_ForYear() {
       r.oncrawlBase = 0;
     } else {
       const caps = cfg.oncrawlCaps[r.tier] || cfg.oncrawlCaps['Tier D'] || { nonpaying: 2500, paying: 4000 };
-      r.oncrawlBase = r.paying ? (caps.paying ?? 4000) : (caps.nonpaying ?? 2500);
+      const baseCap = r.paying ? (caps.paying ?? 4000) : (caps.nonpaying ?? 2500);
+      const multiplier = r.siteMultiplier != null ? r.siteMultiplier : 1;
+      r.oncrawlBase = Math.round(baseCap * multiplier);
     }
   });
 
@@ -299,7 +309,7 @@ function Build_FairUsage_ForYear() {
   const outSh = getOrCreateSheet_(ss, outName);
   const header = [
     'Account','Market','Year',
-    'Tier','Pays Tech Fee?','Revenue','Tech Fee',
+    'Tier','Site Size','Pays Tech Fee?','Revenue','Tech Fee',
     'Regional Band','Tech-Fee Share % (Pool)',
     'AccuRanker Base','AccuRanker Contributor','AccuRanker Total',
     'OnCrawl Base','OnCrawl Contributor','OnCrawl Total',
@@ -308,7 +318,7 @@ function Build_FairUsage_ForYear() {
   const out = [header];
   rows.forEach(r => out.push([
     r.account, r.market, year,
-    r.tier, r.paying ? 'Yes':'No', r.revenue, r.techFee,
+    r.tier, r.siteSize, r.paying ? 'Yes':'No', r.revenue, r.techFee,
     r.regionBandName, round2_(r.poolSharePct),
     r.accuBase, r.accuContributor, r.accuTotal,
     // OnCrawl uses starter caps for now. Contributor logic can be added later.
@@ -322,11 +332,11 @@ function Build_FairUsage_ForYear() {
   // Formatting
   outSh.getRange(1,1,1,header.length).setFontWeight('bold');
   if (out.length > 1) {
-    outSh.getRange(2,6,out.length-1,2).setNumberFormat('#,##0');      // revenue, tech fee
-    outSh.getRange(2,9,out.length-1,1).setNumberFormat('0.00"%"');    // share %
-    outSh.getRange(2,10,out.length-1,3).setNumberFormat('#,##0');     // AccuRanker numbers
-    outSh.getRange(2,13,out.length-1,3).setNumberFormat('#,##0');     // OnCrawl numbers
-    outSh.getRange(2,16,out.length-1,1).setNumberFormat('#,##0');     // Semrush cap
+    outSh.getRange(2,7,out.length-1,2).setNumberFormat('#,##0');      // revenue, tech fee
+    outSh.getRange(2,10,out.length-1,1).setNumberFormat('0.00"%"');  // share %
+    outSh.getRange(2,11,out.length-1,3).setNumberFormat('#,##0');     // AccuRanker numbers
+    outSh.getRange(2,14,out.length-1,3).setNumberFormat('#,##0');     // OnCrawl numbers
+    outSh.getRange(2,17,out.length-1,1).setNumberFormat('#,##0');     // Semrush cap
   }
   if (outSh.getFilter()) outSh.getFilter().remove();
   outSh.getRange(1,1,out.length,header.length).createFilter();
@@ -403,6 +413,75 @@ function EnsureSetupTab_() {
     for (let c=1;c<=4;c++) sh.autoResizeColumn(c);
   }
 
+  // Ensure OnCrawl blocks exist even on legacy Setup sheets (append if missing)
+  (function ensureOncrawlBlocks() {
+    const lastRow = Math.max(1, sh.getLastRow());
+    const firstCol = sh.getRange(1,1,lastRow,1).getDisplayValues().map(r => r[0] || '');
+
+    const needCadence = firstCol.indexOf('Crawl Cadence Rules') === -1;
+    const needOncrawlCaps = firstCol.indexOf('OnCrawl Starter Caps') === -1;
+
+    let appendRows = [];
+    if (needCadence) {
+      appendRows = appendRows.concat([
+        ['', '', '', ''],
+        ['Crawl Cadence Rules','Non-paying','Paying','(OnCrawl)'],
+        ['Tier A','Monthly','Weekly/Fortnightly',''],
+        ['Tier B','Bi-monthly or Quarterly','Monthly',''],
+        ['Tier C','Quarterly','Quarterly',''],
+        ['Tier D','One-off / Quarterly by request','One-off / Quarterly by request','']
+      ]);
+    }
+    if (needOncrawlCaps) {
+      appendRows = appendRows.concat([
+        ['', '', '', ''],
+        ['OnCrawl Starter Caps','Non-paying','Paying','(monthly starter defaults)'],
+        ['Tier A',25000,40000,''],
+        ['Tier B',10000,18000,''],
+        ['Tier C',5000,8000,''],
+        ['Tier D',2500,4000,'']
+      ]);
+    }
+    if (appendRows.length > 0) {
+      const startR = sh.getLastRow() + 1;
+      sh.getRange(startR, 1, appendRows.length, 4).setValues(appendRows);
+    }
+  })();
+
+  // Ensure Site Size configuration blocks exist (account multipliers)
+  (function ensureSiteSizeBlocks() {
+    const lastRow = Math.max(1, sh.getLastRow());
+    const firstCol = sh.getRange(1,1,lastRow,1).getDisplayValues().map(r => r[0] || '');
+
+    const needSizeMultipliers = firstCol.indexOf('Site Size Multipliers') === -1;
+    const needAccountSizes = firstCol.indexOf('Account→Site Size') === -1;
+
+    let appendRows = [];
+    if (needSizeMultipliers) {
+      appendRows = appendRows.concat([
+        ['', '', '', ''],
+        ['Site Size Multipliers','Multiplier','Page Count Guidance','Notes'],
+        ['Default',1.0,'< 5k pages or standard demand','Fallback when no size is specified'],
+        ['Small',0.8,'< 5k indexed pages','Lower crawl demand'],
+        ['Medium',1.0,'5k – 30k indexed pages','Baseline allocation'],
+        ['Large',1.3,'30k+ indexed pages or ecommerce','Boosted allocation']
+      ]);
+    }
+    if (needAccountSizes) {
+      appendRows = appendRows.concat([
+        ['', '', '', ''],
+        ['Account→Site Size','Site Size','Pages (optional)','Notes'],
+        ['Example Account A','Large','','Replace with your account + size'],
+        ['Example Account B','Medium','',''],
+        ['Example Account C','Small','','']
+      ]);
+    }
+    if (appendRows.length > 0) {
+      const startR = sh.getLastRow() + 1;
+      sh.getRange(startR, 1, appendRows.length, 4).setValues(appendRows);
+    }
+  })();
+
   // Read config
   const values = sh.getDataRange().getDisplayValues();
 
@@ -472,6 +551,24 @@ function EnsureSetupTab_() {
     }
   });
 
+  // Site size multipliers
+  const siteSizeMultipliers = {};
+  readTable_(values, 'Site Size Multipliers', row => {
+    if (row[0]) {
+      const key = String(row[0]).trim();
+      const multiplier = parseFloat(row[1]);
+      if (key) siteSizeMultipliers[key] = isFinite(multiplier) ? multiplier : 1;
+    }
+  });
+
+  // Account level site size assignments
+  const accountSiteSizes = {};
+  readTable_(values, 'Account→Site Size', row => {
+    const account = row[0] ? String(row[0]).trim() : '';
+    const size = row[1] ? String(row[1]).trim() : '';
+    if (account && size) accountSiteSizes[account.toLowerCase()] = size;
+  });
+
   return {
     accuCapacity: capacity,
     basePct, poolPct, bufferPct,
@@ -481,6 +578,8 @@ function EnsureSetupTab_() {
     semrushCaps,
     crawlCadence,
     oncrawlCaps,
+    siteSizeMultipliers,
+    accountSiteSizes,
   };
 }
 
