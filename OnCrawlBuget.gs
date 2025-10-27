@@ -32,7 +32,12 @@ function populateOncrawlMonthlyBudget(options) {
     adjustmentsSheet.setFrozenRows(1);
   }
   if (!statsSheet) {
-    throw new Error('Could not find the "OnCrawl Stats" sheet.');
+    var statsName = settings.statsSheetName || 'OnCrawl Stats';
+    statsSheet = spreadsheet.insertSheet(statsName);
+    // Seed expected headers and freeze header row
+    var statsHeaders = ['Domain','Monthly URL Budget','Avg Daily URLs','Crawl Days In Month'];
+    statsSheet.getRange(1, 1, 1, statsHeaders.length).setValues([statsHeaders]);
+    statsSheet.setFrozenRows(1);
   }
 
   var adjustmentsData = getSheetData(adjustmentsSheet);
