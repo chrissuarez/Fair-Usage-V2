@@ -26,11 +26,11 @@ On spreadsheet open (`onOpen`), a **Tech Fee Tools** menu is added with three ac
 
 - **Refresh Fair-Usage Table** (`Build_FairUsage_ForYear`)  
   Rebuilds the `Tech Fair-Usage – {year}` sheet. It:
-  - Loads or creates the `Setup` tab and reads capacity/percentage settings.
+  - Loads or creates the `Setup` tab and reads capacity/percentage settings (including crawler opt-out bonuses).
   - Calculates revenue tiers, region bands, and site-size multipliers per account.
-  - Splits AccuRanker capacity into base and contributor pools, respecting tier ceilings and a global buffer.
-  - Derives Semrush keyword caps, OnCrawl cadence, and starter crawl budgets.
-  - Outputs a fully formatted summary with frozen headers and filters.
+  - Splits AccuRanker capacity into base and contributor pools, respecting tier ceilings that are now boosted by site size and optional own-crawler multipliers, plus a global buffer.
+  - Derives Semrush keyword caps, OnCrawl cadence, and starter crawl budgets (skipping OnCrawl entirely for accounts flagged with their own crawler).
+  - Outputs a fully formatted summary with frozen headers, filters, and an “Own Crawler?” column so stakeholders can see why allocations vary.
 
 - **Create/Update Setup Tab** (`EnsureSetupTab_`)  
   Creates the `Setup` configuration tab (and pads it to four columns) if it is missing or sparsely populated. It also back-fills newer sections—crawl cadence rules, OnCrawl starter caps, and site size multipliers—on older sheets.
@@ -40,14 +40,16 @@ On spreadsheet open (`onOpen`), a **Tech Fee Tools** menu is added with three ac
 
 | Block | Notes |
 | --- | --- |
-| `ACCURANKER_CAPACITY`, `SPLIT_BASE_PCT`, `SPLIT_POOL_PCT`, `SPLIT_BUFFER_PCT` | Control the total AccuRanker slots and Base/Contributor/Buffer split. |
-| `Revenue Tiers` | Defines tier min/max revenue, plus base & ceiling allocations. |
-| `Regional Bands` and `Market+Regional Band` | Associate markets with multipliers that influence contributor pool share. |
+| `ACCURANKER_CAPACITY`, `SPLIT_BASE_PCT`, `SPLIT_POOL_PCT`, `SPLIT_BUFFER_PCT`, `OWN_CRAWLER_ACCU_MULT`, `OWN_CRAWLER_SKIP_ONCRAWL` | Control the total AccuRanker slots, Base/Contributor/Buffer split, and how much to boost/disable allocations for accounts with their own crawler. |
+| `Client Tier Matrix` | Defines tier min/max revenue, plus Accu base & ceiling allocations (ceiling is later multiplied by site size and crawler bonuses). |
 | `Semrush Caps` | Keyword caps per tier for paying vs non-paying accounts. |
-| `Crawl Cadence Rules` | Default OnCrawl cadence strings. |
 | `OnCrawl Starter Caps` | Base crawl budget defaults per tier (paying and non-paying). |
-| `Site Size Multipliers` | Optional multipliers tied to site size buckets. |
-| `Account+Site Size` | Overrides to map specific accounts to size buckets. |
+| `Crawl Cadence Rules` | Default OnCrawl cadence strings. |
+| `Regional Band Multipliers` and `Market→Regional Band` | Associate markets with multipliers that influence contributor pool share. |
+| `Website Size Multipliers` | Multipliers tied to site size buckets; affect OnCrawl starters and increase AccuRanker ceilings. |
+| `Account→Site Size` | Overrides to map specific accounts to size buckets. |
+| `Account→Crawler Status` | Flags accounts that have their own crawler (skips OnCrawl and applies the Accu bonus). |
+| `Allocation Guidance` | Reference rows explaining how allocations are derived for stakeholders. |
 
 Values can be edited directly in the sheet; the scripts read display values so formulas are supported.
 
