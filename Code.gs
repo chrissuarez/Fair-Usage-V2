@@ -158,6 +158,11 @@ function Build_FairUsage_ForYear() {
     const siteMultiplier = cfg.siteSizeMultipliers && cfg.siteSizeMultipliers.hasOwnProperty(siteSize)
       ? cfg.siteSizeMultipliers[siteSize]
       : (cfg.siteSizeMultipliers && cfg.siteSizeMultipliers.Default != null ? cfg.siteSizeMultipliers.Default : 1);
+    const ownCrawler = !!cfg.accountCrawlerOptOut[accountKey];
+    const bonusRaw = ownCrawler ? (cfg.ownCrawlerAccuMult || 1) : 1;
+    const bonusSafe = (isFinite(bonusRaw) && bonusRaw > 0) ? bonusRaw : 1;
+    const sizeBoost = isFinite(siteMultiplier) && siteMultiplier > 0 ? siteMultiplier : 1;
+    const tierCeilingAdj = Math.max(0, Math.round((tierObj.ceiling || 0) * sizeBoost * bonusSafe));
 
     return {
       account: r.account,
@@ -169,10 +174,13 @@ function Build_FairUsage_ForYear() {
       tier: tierObj.name,
       tierBase: tierObj.base,
       tierCeiling: tierObj.ceiling,
+      accuCeiling: tierCeilingAdj,
+      accuBonus: bonusSafe,
       regionBandName: bandName,
       regionMult,
       siteSize,
-      siteMultiplier: isFinite(siteMultiplier) ? siteMultiplier : 1
+      siteMultiplier: isFinite(siteMultiplier) ? siteMultiplier : 1,
+      ownCrawler
     };
   });
 
@@ -211,6 +219,9 @@ function Build_FairUsage_ForYear() {
     // Base per account = pot1 * (W_tier / Σ(W_tier × #accounts_in_tier))
     const w = weights[r.tier] || 0;
     r.accuBase = totalWeight > 0 ? Math.floor(pot1 * (w / totalWeight)) : 0;
+    if (r.accuBonus && r.accuBonus !== 1) {
+      r.accuBase = Math.floor(r.accuBase * r.accuBonus);
+    }
 
     // Contributor pool share: normalized by weighted tech fees (techFee * regionMult)
     const weighted = r.paying ? ((r.techFee || 0) * (r.regionMult || 1)) : 0;
@@ -218,7 +229,8 @@ function Build_FairUsage_ForYear() {
     const extra = r.paying ? Math.floor(pot2 * share) : 0;
 
     // Cap by tier ceiling (headroom from Base)
-    const headroom = Math.max(0, (r.tierCeiling || 0) - r.accuBase);
+    const ceiling = isFinite(r.accuCeiling) ? r.accuCeiling : r.tierCeiling;
+    const headroom = Math.max(0, (ceiling || 0) - r.accuBase);
     r.accuContributor = Math.min(extra, headroom);
     r.accuTotal = r.accuBase + r.accuContributor;
     r.poolSharePct = r.paying ? (share * 100) : 0;
@@ -253,7 +265,8 @@ function Build_FairUsage_ForYear() {
       activeRows.forEach(r => {
         r.accuBase = Math.floor((r.accuBase || 0) * baseScale);
         // Ensure we don't exceed tier ceiling after base reduction (shouldn't), recompute total
-        const headroom = Math.max(0, (r.tierCeiling || 0) - r.accuBase);
+        const ceiling = isFinite(r.accuCeiling) ? r.accuCeiling : r.tierCeiling;
+        const headroom = Math.max(0, (ceiling || 0) - r.accuBase);
         r.accuContributor = Math.min(r.accuContributor || 0, headroom);
         r.accuTotal = r.accuBase + r.accuContributor;
       });
@@ -270,7 +283,8 @@ function Build_FairUsage_ForYear() {
         r.accuContributor = Math.floor(newTotal * contribRatio);
         r.accuBase = newTotal - r.accuContributor;
         // enforce ceiling
-        const headroom = Math.max(0, (r.tierCeiling || 0) - r.accuBase);
+        const ceiling = isFinite(r.accuCeiling) ? r.accuCeiling : r.tierCeiling;
+        const headroom = Math.max(0, (ceiling || 0) - r.accuBase);
         r.accuContributor = Math.min(r.accuContributor, headroom);
         r.accuTotal = r.accuBase + r.accuContributor;
       });
@@ -289,12 +303,18 @@ function Build_FairUsage_ForYear() {
 
   // --- OnCrawl cadence (inactive = None)
   rows.forEach(r => {
-    r.oncrawlCadence = r.inactive ? 'None' : cadenceFor_(r.tier, r.paying, cfg.crawlCadence);
+    if (r.inactive) {
+      r.oncrawlCadence = 'None';
+    } else if (r.ownCrawler && cfg.ownCrawlerSkipOncrawl) {
+      r.oncrawlCadence = 'Client crawler';
+    } else {
+      r.oncrawlCadence = cadenceFor_(r.tier, r.paying, cfg.crawlCadence);
+    }
   });
 
   // --- OnCrawl starter caps (inactive = 0)
   rows.forEach(r => {
-    if (r.inactive) {
+    if (r.inactive || (r.ownCrawler && cfg.ownCrawlerSkipOncrawl)) {
       r.oncrawlBase = 0;
     } else {
       const caps = cfg.oncrawlCaps[r.tier] || cfg.oncrawlCaps['Tier D'] || { nonpaying: 2500, paying: 4000 };
@@ -309,7 +329,7 @@ function Build_FairUsage_ForYear() {
   const outSh = getOrCreateSheet_(ss, outName);
   const header = [
     'Account','Market','Year',
-    'Tier','Site Size','Pays Tech Fee?','Revenue','Tech Fee',
+    'Tier','Site Size','Own Crawler?','Pays Tech Fee?','Revenue','Tech Fee',
     'Regional Band','Tech-Fee Share % (Pool)',
     'AccuRanker Base','AccuRanker Contributor','AccuRanker Total',
     'OnCrawl Base','OnCrawl Contributor','OnCrawl Total',
@@ -318,7 +338,7 @@ function Build_FairUsage_ForYear() {
   const out = [header];
   rows.forEach(r => out.push([
     r.account, r.market, year,
-    r.tier, r.siteSize, r.paying ? 'Yes':'No', r.revenue, r.techFee,
+    r.tier, r.siteSize, r.ownCrawler ? 'Yes':'No', r.paying ? 'Yes':'No', r.revenue, r.techFee,
     r.regionBandName, round2_(r.poolSharePct),
     r.accuBase, r.accuContributor, r.accuTotal,
     // OnCrawl uses starter caps for now. Contributor logic can be added later.
@@ -332,11 +352,11 @@ function Build_FairUsage_ForYear() {
   // Formatting
   outSh.getRange(1,1,1,header.length).setFontWeight('bold');
   if (out.length > 1) {
-    outSh.getRange(2,7,out.length-1,2).setNumberFormat('#,##0');      // revenue, tech fee
-    outSh.getRange(2,10,out.length-1,1).setNumberFormat('0.00"%"');  // share %
-    outSh.getRange(2,11,out.length-1,3).setNumberFormat('#,##0');     // AccuRanker numbers
-    outSh.getRange(2,14,out.length-1,3).setNumberFormat('#,##0');     // OnCrawl numbers
-    outSh.getRange(2,17,out.length-1,1).setNumberFormat('#,##0');     // Semrush cap
+    outSh.getRange(2,8,out.length-1,2).setNumberFormat('#,##0');      // revenue, tech fee
+    outSh.getRange(2,11,out.length-1,1).setNumberFormat('0.00"%"');  // share %
+    outSh.getRange(2,12,out.length-1,3).setNumberFormat('#,##0');     // AccuRanker numbers
+    outSh.getRange(2,15,out.length-1,3).setNumberFormat('#,##0');     // OnCrawl numbers
+    outSh.getRange(2,18,out.length-1,1).setNumberFormat('#,##0');     // Semrush cap
   }
   if (outSh.getFilter()) outSh.getFilter().remove();
   outSh.getRange(1,1,out.length,header.length).createFilter();
@@ -348,143 +368,27 @@ function Build_FairUsage_ForYear() {
   ui.alert(`Built "${outName}" with ${rows.length} accounts.`);
 }
 
-/*************************
+ /*************************
  * 3) SETUP TAB (creates or updates, with 4 cols padding)
  *************************/
-function EnsureSetupTab_() {
+function EnsureSetupTab_(options) {
+  const opts = options || {};
   const ss = SpreadsheetApp.getActive();
   const shName = 'Setup';
   let sh = ss.getSheetByName(shName);
   if (!sh) sh = ss.insertSheet(shName);
 
-  // If mostly empty, write defaults (ensure exactly 4 columns per row)
   if (sh.getLastRow() < 5) {
-    sh.clear();
-
-    const rows = [
-      ['Key','Value','Notes',''],
-      ['ACCURANKER_CAPACITY',100000,'AccuRanker capacity (≈100k tracking slots).',''],
-      ['SPLIT_BASE_PCT',0.65,'~65% capacity as Base by Tier.',''],
-      ['SPLIT_POOL_PCT',0.25,'~25% Contributor Pool (paying accounts only).',''],
-      ['SPLIT_BUFFER_PCT',0.10,'~10% buffer for launches/incidents.',''],
-      ['','','',''],
-      ['Revenue Tiers','Min','Max','Base / Ceiling'],
-      // These Base / Ceiling values are for AccuRanker (base = default non-paying allocation; ceiling = max)
-      ['Tier A',500000,'', '800 / 2000'],
-      ['Tier B',200000,499999,'500 / 1200'],
-      ['Tier C',50000,199999,'250 / 600'],
-      ['Tier D',0,49999,'100 / 250'],
-      ['','','',''],
-      ['Regional Bands','Multiplier','','Set Market→Band below'],
-      ['Top',1.20,'',''],
-      ['Mid',1.10,'',''],
-      ['Low',1.00,'',''],
-      ['','','',''],
-      ['Semrush Caps','Non-paying','Paying','(per client)'],
-      ['Tier A',200,400,''],
-      ['Tier B',150,300,''],
-      ['Tier C',100,200,''],
-      ['Tier D',50,100,''],
-      ['','','',''],
-      ['Crawl Cadence Rules','Non-paying','Paying','(OnCrawl)'],
-      ['Tier A','Monthly','Weekly/Fortnightly',''],
-      ['Tier B','Bi-monthly or Quarterly','Monthly',''],
-      ['Tier C','Quarterly','Quarterly',''],
-      ['Tier D','One-off / Quarterly by request','One-off / Quarterly by request',''],
-      ['','','',''],
-      ['OnCrawl Starter Caps','Non-paying','Paying','(monthly starter defaults)'],
-      ['Tier A',25000,40000,''],
-      ['Tier B',10000,18000,''],
-      ['Tier C',5000,8000,''],
-      ['Tier D',2500,4000,''],
-      ['','','',''],
-      ['Market→Regional Band','Band','','Set one band per Market'],
-      ['UK','Top','',''],
-      ['ZA','Top','',''],
-      ['US','Mid','',''],
-      ['FR','Low','','']
-    ];
-
-    // Guarantee 4 columns on every row
-    const rows4 = rows.map(r => [r[0] ?? '', r[1] ?? '', r[2] ?? '', r[3] ?? '']);
-
-    sh.getRange(1,1,rows4.length,4).setValues(rows4);
-    sh.setFrozenRows(1);
-    for (let c=1;c<=4;c++) sh.autoResizeColumn(c);
+    renderSetupSheet_(sh, defaultSetupRenderState_());
   }
 
-  // Ensure OnCrawl blocks exist even on legacy Setup sheets (append if missing)
-  (function ensureOncrawlBlocks() {
-    const lastRow = Math.max(1, sh.getLastRow());
-    const firstCol = sh.getRange(1,1,lastRow,1).getDisplayValues().map(r => r[0] || '');
+  let values = sh.getDataRange().getDisplayValues();
+  if (!values || values.length === 0) {
+    renderSetupSheet_(sh, defaultSetupRenderState_());
+    values = sh.getDataRange().getDisplayValues();
+  }
 
-    const needCadence = firstCol.indexOf('Crawl Cadence Rules') === -1;
-    const needOncrawlCaps = firstCol.indexOf('OnCrawl Starter Caps') === -1;
-
-    let appendRows = [];
-    if (needCadence) {
-      appendRows = appendRows.concat([
-        ['', '', '', ''],
-        ['Crawl Cadence Rules','Non-paying','Paying','(OnCrawl)'],
-        ['Tier A','Monthly','Weekly/Fortnightly',''],
-        ['Tier B','Bi-monthly or Quarterly','Monthly',''],
-        ['Tier C','Quarterly','Quarterly',''],
-        ['Tier D','One-off / Quarterly by request','One-off / Quarterly by request','']
-      ]);
-    }
-    if (needOncrawlCaps) {
-      appendRows = appendRows.concat([
-        ['', '', '', ''],
-        ['OnCrawl Starter Caps','Non-paying','Paying','(monthly starter defaults)'],
-        ['Tier A',25000,40000,''],
-        ['Tier B',10000,18000,''],
-        ['Tier C',5000,8000,''],
-        ['Tier D',2500,4000,'']
-      ]);
-    }
-    if (appendRows.length > 0) {
-      const startR = sh.getLastRow() + 1;
-      sh.getRange(startR, 1, appendRows.length, 4).setValues(appendRows);
-    }
-  })();
-
-  // Ensure Site Size configuration blocks exist (account multipliers)
-  (function ensureSiteSizeBlocks() {
-    const lastRow = Math.max(1, sh.getLastRow());
-    const firstCol = sh.getRange(1,1,lastRow,1).getDisplayValues().map(r => r[0] || '');
-
-    const needSizeMultipliers = firstCol.indexOf('Site Size Multipliers') === -1;
-    const needAccountSizes = firstCol.indexOf('Account→Site Size') === -1;
-
-    let appendRows = [];
-    if (needSizeMultipliers) {
-      appendRows = appendRows.concat([
-        ['', '', '', ''],
-        ['Site Size Multipliers','Multiplier','Page Count Guidance','Notes'],
-        ['Default',1.0,'< 5k pages or standard demand','Fallback when no size is specified'],
-        ['Small',0.8,'< 5k indexed pages','Lower crawl demand'],
-        ['Medium',1.0,'5k – 30k indexed pages','Baseline allocation'],
-        ['Large',1.3,'30k+ indexed pages or ecommerce','Boosted allocation']
-      ]);
-    }
-    if (needAccountSizes) {
-      appendRows = appendRows.concat([
-        ['', '', '', ''],
-        ['Account→Site Size','Site Size','Pages (optional)','Notes'],
-        ['Example Account A','Large','','Replace with your account + size'],
-        ['Example Account B','Medium','',''],
-        ['Example Account C','Small','','']
-      ]);
-    }
-    if (appendRows.length > 0) {
-      const startR = sh.getLastRow() + 1;
-      sh.getRange(startR, 1, appendRows.length, 4).setValues(appendRows);
-    }
-  })();
-
-  // Read config
-  const values = sh.getDataRange().getDisplayValues();
-
+  const firstCol = values.map(r => r[0] || '');
   const val = (key, def) => {
     const row = values.find(r => r[0] === key);
     return row ? row[1] : def;
@@ -496,10 +400,12 @@ function EnsureSetupTab_() {
   const basePct   = parseFloat(val('SPLIT_BASE_PCT', 0.65));
   const poolPct   = parseFloat(val('SPLIT_POOL_PCT', 0.25));
   const bufferPct = parseFloat(val('SPLIT_BUFFER_PCT', 0.10));
+  const ownCrawlerAccuMult = parseFloat(val('OWN_CRAWLER_ACCU_MULT', 1.25));
+  const ownCrawlerSkipOncrawl = parseYesNo_(val('OWN_CRAWLER_SKIP_ONCRAWL', 'Yes'));
 
   // Parse “Revenue Tiers” block with “Base / Ceiling” column
   const tiers = [];
-  readTable_(values, 'Revenue Tiers', row => {
+  readTable_(values, ['Client Tier Matrix','Revenue Tiers'], row => {
     const name = row[0];
     if (/^Tier\s+[A-D]$/i.test(name)) {
       const baseCeil = String(row[3] || '').split('/');
@@ -517,7 +423,7 @@ function EnsureSetupTab_() {
 
   // Regional bands
   const regionalBands = {};
-  readTable_(values, 'Regional Bands', row => {
+  readTable_(values, ['Regional Band Multipliers','Regional Bands'], row => {
     if (row[0] && row[1]) regionalBands[row[0]] = parseFloat(row[1]);
   });
 
@@ -553,7 +459,7 @@ function EnsureSetupTab_() {
 
   // Site size multipliers
   const siteSizeMultipliers = {};
-  readTable_(values, 'Site Size Multipliers', row => {
+  readTable_(values, ['Website Size Multipliers','Site Size Multipliers'], row => {
     if (row[0]) {
       const key = String(row[0]).trim();
       const multiplier = parseFloat(row[1]);
@@ -569,6 +475,48 @@ function EnsureSetupTab_() {
     if (account && size) accountSiteSizes[account.toLowerCase()] = size;
   });
 
+  // Account level crawler opt-outs
+  const accountCrawlerOptOut = {};
+  readTable_(values, 'Account→Crawler Status', row => {
+    const account = row[0] ? String(row[0]).trim() : '';
+    const setting = row[1] ? String(row[1]).trim() : '';
+    if (!account) return;
+    if (parseYesNo_(setting)) {
+      accountCrawlerOptOut[account.toLowerCase()] = true;
+    }
+  });
+
+  const capturedTables = {
+    tiers: captureTable_(values, ['Client Tier Matrix','Revenue Tiers']),
+    semrush: captureTable_(values, 'Semrush Caps'),
+    onCrawl: captureTable_(values, 'OnCrawl Starter Caps'),
+    cadence: captureTable_(values, 'Crawl Cadence Rules'),
+    regionalBands: captureTable_(values, ['Regional Band Multipliers','Regional Bands']),
+    marketBands: captureTable_(values, 'Market→Regional Band'),
+    siteSizeMultipliers: captureTable_(values, ['Website Size Multipliers','Site Size Multipliers']),
+    accountSizes: captureTable_(values, 'Account→Site Size'),
+    crawlerStatus: captureTable_(values, 'Account→Crawler Status'),
+    allocationGuidance: captureTable_(values, 'Allocation Guidance')
+  };
+
+  const needsRefresh = ['Client Tier Matrix','Regional Band Multipliers','Website Size Multipliers','Account→Crawler Status','Allocation Guidance','OWN_CRAWLER_ACCU_MULT']
+    .some(label => firstCol.indexOf(label) === -1);
+
+  if (needsRefresh && !opts._skipRender) {
+    renderSetupSheet_(sh, {
+      keyValues: {
+        ACCURANKER_CAPACITY: capacity || 100000,
+        SPLIT_BASE_PCT: isFinite(basePct) ? basePct : 0.65,
+        SPLIT_POOL_PCT: isFinite(poolPct) ? poolPct : 0.25,
+        SPLIT_BUFFER_PCT: isFinite(bufferPct) ? bufferPct : 0.10,
+        OWN_CRAWLER_ACCU_MULT: isFinite(ownCrawlerAccuMult) ? ownCrawlerAccuMult : 1.25,
+        OWN_CRAWLER_SKIP_ONCRAWL: ownCrawlerSkipOncrawl ? 'Yes' : 'No'
+      },
+      tableRows: capturedTables
+    });
+    return EnsureSetupTab_({ _skipRender: true });
+  }
+
   return {
     accuCapacity: capacity,
     basePct, poolPct, bufferPct,
@@ -580,7 +528,213 @@ function EnsureSetupTab_() {
     oncrawlCaps,
     siteSizeMultipliers,
     accountSiteSizes,
+    accountCrawlerOptOut,
+    ownCrawlerAccuMult: isFinite(ownCrawlerAccuMult) && ownCrawlerAccuMult > 0 ? ownCrawlerAccuMult : 1,
+    ownCrawlerSkipOncrawl,
   };
+}
+
+function renderSetupSheet_(sheet, state) {
+  const keyValues = (state && state.keyValues) || {};
+  const tableRows = (state && state.tableRows) || {};
+  const rows = [];
+  const pushBlank = () => rows.push(['','','','']);
+
+  rows.push(['Key','Value','Notes','']);
+  rows.push(padRow4_(['ACCURANKER_CAPACITY', keyValues.ACCURANKER_CAPACITY ?? 100000, 'AccuRanker capacity (≈100k tracking slots).','']));
+  rows.push(padRow4_(['SPLIT_BASE_PCT', keyValues.SPLIT_BASE_PCT ?? 0.65, '~65% capacity as Base by Tier.','']));
+  rows.push(padRow4_(['SPLIT_POOL_PCT', keyValues.SPLIT_POOL_PCT ?? 0.25, '~25% Contributor Pool (payers only).','']));
+  rows.push(padRow4_(['SPLIT_BUFFER_PCT', keyValues.SPLIT_BUFFER_PCT ?? 0.10, '~10% buffer for launches/incidents.','']));
+  rows.push(padRow4_(['OWN_CRAWLER_ACCU_MULT', keyValues.OWN_CRAWLER_ACCU_MULT ?? 1.25, 'Multiplier applied to AccuRanker base + ceiling when a client has their own crawler.','']));
+  rows.push(padRow4_(['OWN_CRAWLER_SKIP_ONCRAWL', keyValues.OWN_CRAWLER_SKIP_ONCRAWL ?? 'Yes', '"Yes" disables OnCrawl cadence/URLs when Own Crawler? = true.','']));
+
+  pushBlank();
+  rows.push(['Client Tier Matrix','Revenue Min','Revenue Max','Accu Base / Ceiling']);
+  (tableRows.tiers && tableRows.tiers.length ? tableRows.tiers : defaultTierRows_())
+    .forEach(row => rows.push(padRow4_(row)));
+
+  pushBlank();
+  rows.push(['Semrush Caps','Non-paying','Paying','(per client)']);
+  (tableRows.semrush && tableRows.semrush.length ? tableRows.semrush : defaultSemrushRows_())
+    .forEach(row => rows.push(padRow4_(row)));
+
+  pushBlank();
+  rows.push(['OnCrawl Starter Caps','Non-paying','Paying','(monthly starter defaults)']);
+  (tableRows.onCrawl && tableRows.onCrawl.length ? tableRows.onCrawl : defaultOncrawlRows_())
+    .forEach(row => rows.push(padRow4_(row)));
+
+  pushBlank();
+  rows.push(['Crawl Cadence Rules','Non-paying','Paying','(OnCrawl)']);
+  (tableRows.cadence && tableRows.cadence.length ? tableRows.cadence : defaultCadenceRows_())
+    .forEach(row => rows.push(padRow4_(row)));
+
+  pushBlank();
+  rows.push(['Regional Band Multipliers','Multiplier','','Notes']);
+  (tableRows.regionalBands && tableRows.regionalBands.length ? tableRows.regionalBands : defaultRegionalBandRows_())
+    .forEach(row => rows.push(padRow4_(row)));
+
+  pushBlank();
+  rows.push(['Market→Regional Band','Band','','Notes']);
+  (tableRows.marketBands && tableRows.marketBands.length ? tableRows.marketBands : defaultMarketBandRows_())
+    .forEach(row => rows.push(padRow4_(row)));
+
+  pushBlank();
+  rows.push(['Website Size Multipliers','Multiplier','Page Count Guidance','Notes']);
+  (tableRows.siteSizeMultipliers && tableRows.siteSizeMultipliers.length ? tableRows.siteSizeMultipliers : defaultSiteSizeRows_())
+    .forEach(row => rows.push(padRow4_(row)));
+
+  pushBlank();
+  rows.push(['Account→Site Size','Site Size','Pages (optional)','Notes']);
+  (tableRows.accountSizes && tableRows.accountSizes.length ? tableRows.accountSizes : defaultAccountSizeRows_())
+    .forEach(row => rows.push(padRow4_(row)));
+
+  pushBlank();
+  rows.push(['Account→Crawler Status','Own Crawler?','Notes','']);
+  (tableRows.crawlerStatus && tableRows.crawlerStatus.length ? tableRows.crawlerStatus : defaultCrawlerRows_())
+    .forEach(row => rows.push(padRow4_(row)));
+
+  pushBlank();
+  rows.push(['Allocation Guidance','AccuRanker Keywords','Semrush Keywords','OnCrawl URLs / Cadence']);
+  (tableRows.allocationGuidance && tableRows.allocationGuidance.length ? tableRows.allocationGuidance : defaultAllocationRows_())
+    .forEach(row => rows.push(padRow4_(row)));
+
+  sheet.clear();
+  sheet.getRange(1,1,rows.length,4).setValues(rows);
+  sheet.setFrozenRows(1);
+  for (let c=1;c<=4;c++) sheet.autoResizeColumn(c);
+}
+
+function defaultSetupRenderState_() {
+  return {
+    keyValues: {
+      ACCURANKER_CAPACITY: 100000,
+      SPLIT_BASE_PCT: 0.65,
+      SPLIT_POOL_PCT: 0.25,
+      SPLIT_BUFFER_PCT: 0.10,
+      OWN_CRAWLER_ACCU_MULT: 1.25,
+      OWN_CRAWLER_SKIP_ONCRAWL: 'Yes'
+    },
+    tableRows: {
+      tiers: defaultTierRows_(),
+      semrush: defaultSemrushRows_(),
+      onCrawl: defaultOncrawlRows_(),
+      cadence: defaultCadenceRows_(),
+      regionalBands: defaultRegionalBandRows_(),
+      marketBands: defaultMarketBandRows_(),
+      siteSizeMultipliers: defaultSiteSizeRows_(),
+      accountSizes: defaultAccountSizeRows_(),
+      crawlerStatus: defaultCrawlerRows_(),
+      allocationGuidance: defaultAllocationRows_()
+    }
+  };
+}
+
+function defaultTierRows_() {
+  return [
+    ['Tier A',500000,'','800 / 2000'],
+    ['Tier B',200000,499999,'500 / 1200'],
+    ['Tier C',50000,199999,'250 / 600'],
+    ['Tier D',0,49999,'100 / 250']
+  ];
+}
+
+function defaultSemrushRows_() {
+  return [
+    ['Tier A',200,400,''],
+    ['Tier B',150,300,''],
+    ['Tier C',100,200,''],
+    ['Tier D',50,100,'']
+  ];
+}
+
+function defaultOncrawlRows_() {
+  return [
+    ['Tier A',25000,40000,''],
+    ['Tier B',10000,18000,''],
+    ['Tier C',5000,8000,''],
+    ['Tier D',2500,4000,'']
+  ];
+}
+
+function defaultCadenceRows_() {
+  return [
+    ['Tier A','Monthly','Weekly/Fortnightly',''],
+    ['Tier B','Bi-monthly or Quarterly','Monthly',''],
+    ['Tier C','Quarterly','Quarterly',''],
+    ['Tier D','One-off / Quarterly by request','One-off / Quarterly by request','']
+  ];
+}
+
+function defaultRegionalBandRows_() {
+  return [
+    ['Top',1.20,'','High focus markets'],
+    ['Mid',1.10,'','Developed markets'],
+    ['Low',1.00,'','Baseline']
+  ];
+}
+
+function defaultMarketBandRows_() {
+  return [
+    ['UK','Top','',''],
+    ['ZA','Top','',''],
+    ['US','Mid','',''],
+    ['FR','Low','','']
+  ];
+}
+
+function defaultSiteSizeRows_() {
+  return [
+    ['Default',1.0,'< 5k pages or standard demand','Fallback when no size is specified'],
+    ['Small',0.8,'< 5k indexed pages','Lower crawl demand'],
+    ['Medium',1.0,'5k – 30k indexed pages','Baseline allocation'],
+    ['Large',1.3,'30k+ indexed pages or ecommerce','Boosted allocation']
+  ];
+}
+
+function defaultAccountSizeRows_() {
+  return [
+    ['Example Account A','Large','','Replace with your account + size'],
+    ['Example Account B','Medium','',''],
+    ['Example Account C','Small','','']
+  ];
+}
+
+function defaultCrawlerRows_() {
+  return [
+    ['Example Account D','Yes','Skips OnCrawl and gains Accu bonus','']
+  ];
+}
+
+function defaultAllocationRows_() {
+  return [
+    ['How to use','Accu = Tier base × regional multiplier × site-size multiplier (own crawler bonus applies before pool).','Semrush caps follow tier table; apply regional multipliers if required.','OnCrawl starter caps × site multiplier; set to zero when Own Crawler? = Yes.'],
+    ['Example (Tier B • Mid • Large)','≈500 × 1.10 × 1.30 ≈ 715 base keywords before contributor pool.','150 / 300 × 1.10 ≈ 165 / 330 keywords.','10k / 18k × 1.30 ≈ 13k / 23k URLs; cadence from rules.']
+  ];
+}
+
+function padRow4_(row) {
+  return [row[0] ?? '', row[1] ?? '', row[2] ?? '', row[3] ?? ''];
+}
+
+function captureTable_(values, header) {
+  const headers = Array.isArray(header) ? header : [header];
+  for (let i=0; i<values.length; i++) {
+    if (headers.indexOf(values[i][0]) !== -1) {
+      const rows = [];
+      for (let r=i+1; r<values.length; r++) {
+        const row = values[r];
+        if (!row[0]) break;
+        rows.push(padRow4_(row));
+      }
+      return rows;
+    }
+  }
+  return [];
+}
+
+function parseYesNo_(value) {
+  if (value === undefined || value === null) return false;
+  return /^(yes|y|true|1)$/i.test(String(value).trim());
 }
 
 /*************************
@@ -597,9 +751,10 @@ function cadenceFor_(tierName, paying, map) {
   return paying ? t.paying : t.nonpaying;
 }
 function readTable_(values, header, rowHandler) {
+  const headers = Array.isArray(header) ? header : [header];
   let start = -1;
   for (let i=0;i<values.length;i++) {
-    if (values[i][0] === header) { start = i+1; break; }
+    if (headers.indexOf(values[i][0]) !== -1) { start = i+1; break; }
   }
   if (start < 0) return;
   for (let r=start; r<values.length; r++) {
