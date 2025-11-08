@@ -114,6 +114,7 @@ function Build_FairUsage_ForYear() {
 
   // Load Setup (this also CREATES it if missing)
   const cfg = EnsureSetupTab_();
+  const accountConfig = EnsureAccountConfigTab_();
 
   // SEO
   const seoYearCol = SEO_YEAR_COLS[year];
@@ -141,12 +142,17 @@ function Build_FairUsage_ForYear() {
   // --- Tiering + region (mark inactive if no revenue)
   const rows = seoRows.map(r => {
     const revenue = Number(r.revenue) || 0;
-    const inactive = revenue <= 0;
+    const accountKey = r.account.toLowerCase();
+    const config = accountConfig[accountKey];
 
     // still look up tech fee, but inactive accounts won't get allocations
-    const accountKey = r.account.toLowerCase();
     const techFee = techByAccount.get(accountKey) || 0;
     const paying  = techFee > 0;
+
+    let inactive = revenue <= 0;
+    if (config && config.activeDefined) {
+      inactive = !config.active;
+    }
 
     // If inactive, force to "Inactive" with zero base/ceiling
     const tierObj = inactive ? { name:'Inactive', base:0, ceiling:0 } : inferTier_(revenue, cfg.tiers);
@@ -154,13 +160,21 @@ function Build_FairUsage_ForYear() {
     const bandName = cfg.marketBands[r.market] || 'Low';
     const regionMult = cfg.regionalBands[bandName] != null ? cfg.regionalBands[bandName] : 1.00;
 
-    const siteSize = cfg.accountSiteSizes[accountKey] || 'Default';
+    let siteSize = config && config.siteSize ? config.siteSize : (cfg.accountSiteSizes[accountKey] || 'Default');
+    if (!siteSize) siteSize = 'Default';
     const siteMultiplier = cfg.siteSizeMultipliers && cfg.siteSizeMultipliers.hasOwnProperty(siteSize)
       ? cfg.siteSizeMultipliers[siteSize]
       : (cfg.siteSizeMultipliers && cfg.siteSizeMultipliers.Default != null ? cfg.siteSizeMultipliers.Default : 1);
-    const ownCrawler = !!cfg.accountCrawlerOptOut[accountKey];
+
+    const ownCrawler = config && config.ownCrawlerDefined
+      ? config.ownCrawler
+      : !!cfg.accountCrawlerOptOut[accountKey];
     const bonusRaw = ownCrawler ? (cfg.ownCrawlerAccuMult || 1) : 1;
     const bonusSafe = (isFinite(bonusRaw) && bonusRaw > 0) ? bonusRaw : 1;
+
+    const oneSearch = config && config.oneSearchDefined ? config.oneSearch : false;
+    const oneSearchExtra = oneSearch ? (config.oneSearchExtra || 0) : 0;
+
     return {
       account: r.account,
       market:  r.market,
@@ -175,7 +189,10 @@ function Build_FairUsage_ForYear() {
       regionMult,
       siteSize,
       siteMultiplier: isFinite(siteMultiplier) ? siteMultiplier : 1,
-      ownCrawler
+      ownCrawler,
+      isActive: !inactive,
+      oneSearch,
+      oneSearchExtra: oneSearchExtra
     };
   });
   // --- AccuRanker allocation (deterministic by tier/size/bonuses)
@@ -198,16 +215,19 @@ function Build_FairUsage_ForYear() {
     const crawlerFactor = r.accuBonus || 1;
     const payerMultiplier = r.paying ? 1 : nonPayerMult;
     const payerBonus = r.paying ? techFeeBonus : 0;
+    const oneSearchExtra = r.oneSearch ? (r.oneSearchExtra || 0) : 0;
 
     let allocation = tierBase * regionalFactor * siteFactor;
     allocation = allocation * payerMultiplier;
     allocation += payerBonus;
+    allocation += oneSearchExtra;
     allocation = allocation * crawlerFactor;
 
     r.accuBase = Math.max(0, Math.round(allocation));
     r.accuContributor = 0;
     r.accuTotal = r.accuBase;
     r.techBonusApplied = payerBonus;
+    r.oneSearchApplied = oneSearchExtra;
   });
 
   const totalAccuAllocated = rows.reduce((s, r) => s + (r.accuTotal || 0), 0);
@@ -252,8 +272,8 @@ function Build_FairUsage_ForYear() {
   const outSh = getOrCreateSheet_(ss, outName);
   const header = [
     'Account','Market','Year',
-    'Tier','Site Size','Own Crawler?','Pays Tech Fee?','Revenue','Tech Fee',
-    'Regional Band','Tech Fee Bonus (Keywords)',
+    'Tier','Site Size','Own Crawler?','Active?','OneSearch?','Pays Tech Fee?','Revenue','Tech Fee',
+    'Regional Band','Tech Fee Bonus (Keywords)','OneSearch Extra Keywords',
     'AccuRanker Base','AccuRanker Contributor','AccuRanker Total',
     'OnCrawl Base','OnCrawl Contributor','OnCrawl Total',
     'Semrush Keyword Cap','OnCrawl Cadence'
@@ -261,8 +281,8 @@ function Build_FairUsage_ForYear() {
   const out = [header];
   rows.forEach(r => out.push([
     r.account, r.market, year,
-    r.tier, r.siteSize, r.ownCrawler ? 'Yes':'No', r.paying ? 'Yes':'No', r.revenue, r.techFee,
-    r.regionBandName, r.techBonusApplied || 0,
+    r.tier, r.siteSize, r.ownCrawler ? 'Yes':'No', r.isActive ? 'Yes':'No', r.oneSearch ? 'Yes':'No', r.paying ? 'Yes':'No', r.revenue, r.techFee,
+    r.regionBandName, r.techBonusApplied || 0, r.oneSearchApplied || 0,
     r.accuBase, r.accuContributor, r.accuTotal,
     // OnCrawl uses starter caps for now. Contributor logic can be added later.
     r.oncrawlBase, 0, r.oncrawlBase,
@@ -285,11 +305,11 @@ function Build_FairUsage_ForYear() {
   // Formatting
   outSh.getRange(1,1,1,header.length).setFontWeight('bold');
   if (out.length > 1) {
-    outSh.getRange(2,8,out.length-1,2).setNumberFormat('#,##0');      // revenue, tech fee
-    outSh.getRange(2,11,out.length-1,1).setNumberFormat('#,##0');     // tech fee bonus
-    outSh.getRange(2,12,out.length-1,3).setNumberFormat('#,##0');     // AccuRanker numbers
-    outSh.getRange(2,15,out.length-1,3).setNumberFormat('#,##0');     // OnCrawl numbers
-    outSh.getRange(2,18,out.length-1,1).setNumberFormat('#,##0');     // Semrush cap
+    outSh.getRange(2,10,out.length-1,2).setNumberFormat('#,##0');     // revenue, tech fee
+    outSh.getRange(2,13,out.length-1,2).setNumberFormat('#,##0');     // bonuses / extras
+    outSh.getRange(2,15,out.length-1,3).setNumberFormat('#,##0');     // AccuRanker numbers
+    outSh.getRange(2,18,out.length-1,3).setNumberFormat('#,##0');     // OnCrawl numbers
+    outSh.getRange(2,21,out.length-1,1).setNumberFormat('#,##0');     // Semrush cap
   }
   if (outSh.getFilter()) outSh.getFilter().remove();
   outSh.getRange(1,1,out.length,header.length).createFilter();
@@ -464,6 +484,53 @@ function EnsureSetupTab_(options) {
     nonPayerMult: (isFinite(nonPayerMult) && nonPayerMult > 0) ? nonPayerMult : 1,
     ownCrawlerSkipOncrawl,
   };
+}
+
+function EnsureAccountConfigTab_() {
+  const ss = SpreadsheetApp.getActive();
+  const sheetName = 'Account Config';
+  let sh = ss.getSheetByName(sheetName);
+  if (!sh) sh = ss.insertSheet(sheetName);
+
+  if (sh.getLastRow() < 2) {
+    const rows = [
+      ['Account','Site Size','Own Crawler?','Active?','OneSearch Account?','OneSearch Extra Keywords','Notes'],
+      ['Example Account A','Large','No','Yes','No',0,'Fill this table with your accounts'],
+      ['Example Account B','Medium','Yes','Yes','Yes',300,'Own crawler + OneSearch'],
+      ['Example Account C','Small','No','No','No',0,'Inactive account example']
+    ];
+    sh.clear();
+    sh.getRange(1,1,rows.length,rows[0].length).setValues(rows);
+    sh.setFrozenRows(1);
+    for (let c=1;c<=rows[0].length;c++) sh.autoResizeColumn(c);
+  }
+
+  const values = sh.getDataRange().getDisplayValues();
+  const configs = {};
+  const hasValue = v => v !== null && v !== undefined && String(v).trim() !== '';
+  for (let i=1; i<values.length; i++) {
+    const row = values[i];
+    const account = safeStr_(row[0]);
+    if (!account) continue;
+    const key = account.toLowerCase();
+    const siteSize = safeStr_(row[1]);
+
+    const ownCrawlerDefined = hasValue(row[2]);
+    const activeDefined = hasValue(row[3]);
+    const oneSearchDefined = hasValue(row[4]);
+
+    configs[key] = {
+      siteSize,
+      ownCrawler: ownCrawlerDefined ? parseYesNo_(row[2]) : false,
+      ownCrawlerDefined,
+      active: activeDefined ? parseYesNo_(row[3]) : true,
+      activeDefined,
+      oneSearch: oneSearchDefined ? parseYesNo_(row[4]) : false,
+      oneSearchDefined,
+      oneSearchExtra: toNumber_(row[5])
+    };
+  }
+  return configs;
 }
 
 function renderSetupSheet_(sheet, state) {

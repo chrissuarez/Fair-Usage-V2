@@ -47,11 +47,21 @@ On spreadsheet open (`onOpen`), a **Tech Fee Tools** menu is added with three ac
 | `Crawl Cadence Rules` | Default OnCrawl cadence strings. |
 | `Regional Band Multipliers` and `Market→Regional Band` | Associate markets with multipliers that influence the deterministic AccuRanker calculation. |
 | `Website Size Multipliers` | Multipliers tied to site size buckets; affect OnCrawl starters and grow the AccuRanker baseline. |
-| `Account→Site Size` | Overrides to map specific accounts to size buckets. |
-| `Account→Crawler Status` | Flags accounts that have their own crawler (skips OnCrawl and applies the Accu bonus). |
+| `Account→Site Size` | Legacy fallback to map specific accounts to size buckets. The new `Account Config` tab takes precedence when populated. |
+| `Account→Crawler Status` | Legacy fallback for crawler opt-outs. The new `Account Config` tab takes precedence when populated. |
 | `Allocation Guidance` | Reference rows explaining how allocations are derived for stakeholders. |
 
 Values can be edited directly in the sheet; the scripts read display values so formulas are supported.
+
+## Account Config Tab
+`EnsureAccountConfigTab_` seeds a separate **Account Config** sheet that lists every account alongside:
+
+- `Site Size` (matches the keys from the Setup tab multipliers)
+- `Own Crawler?` (boolean)
+- `Active?` (boolean toggle to pause allocations mid-year)
+- `OneSearch Account?` and `OneSearch Extra Keywords`
+
+These per-account values override the legacy `Account→Site Size` and `Account→Crawler Status` blocks when present. Leaving a field blank falls back to the legacy tables (or default behavior). Use the `Active?` column to stop issuing allocations for churned clients and the OneSearch fields to grant a fixed keyword top-up on top of the deterministic tier/site/region math.
 
 ## OnCrawl Budget Helper
 `populateOncrawlMonthlyBudget` (in `OnCrawlBuget.gs`) fills the `OnCrawl Monthly URL Budget` and `Budget Source` columns on the `Adjustments` sheet.
