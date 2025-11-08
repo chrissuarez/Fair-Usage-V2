@@ -26,9 +26,9 @@ On spreadsheet open (`onOpen`), a **Tech Fee Tools** menu is added with three ac
 
 - **Refresh Fair-Usage Table** (`Build_FairUsage_ForYear`)  
   Rebuilds the `Tech Fair-Usage – {year}` sheet. It:
-  - Loads or creates the `Setup` tab and reads capacity/percentage settings (including crawler opt-out bonuses).
-  - Calculates revenue tiers, region bands, and site-size multipliers per account.
-  - Splits AccuRanker capacity into base and contributor pools, respecting tier ceilings that are now boosted by site size and optional own-crawler multipliers, plus a global buffer.
+  - Loads or creates the `Setup` tab and reads the deterministic allocation settings (tier base, site-size multiplier, regional band multiplier, tech-fee bonus, non-payer multiplier, and crawler bonus).
+  - Calculates each account’s AccuRanker allocation directly from that matrix—no pooling—so SEO leads can see the same numbers you see in the Setup tab.
+  - Tracks total Accu capacity, allocation consumed, and remaining “headroom” so you know when a plan upgrade is required as new clients onboard.
   - Derives Semrush keyword caps, OnCrawl cadence, and starter crawl budgets (skipping OnCrawl entirely for accounts flagged with their own crawler).
   - Outputs a fully formatted summary with frozen headers, filters, and an “Own Crawler?” column so stakeholders can see why allocations vary.
 
@@ -40,13 +40,13 @@ On spreadsheet open (`onOpen`), a **Tech Fee Tools** menu is added with three ac
 
 | Block | Notes |
 | --- | --- |
-| `ACCURANKER_CAPACITY`, `SPLIT_BASE_PCT`, `SPLIT_POOL_PCT`, `SPLIT_BUFFER_PCT`, `OWN_CRAWLER_ACCU_MULT`, `OWN_CRAWLER_SKIP_ONCRAWL` | Control the total AccuRanker slots, Base/Contributor/Buffer split, and how much to boost/disable allocations for accounts with their own crawler. |
+| `ACCURANKER_CAPACITY`, `TECH_FEE_BONUS`, `NON_PAYER_MULT`, `OWN_CRAWLER_ACCU_MULT`, `OWN_CRAWLER_SKIP_ONCRAWL` | Control the total AccuRanker slots, flat bonuses for tech-fee payers, the multiplier applied to non-payers, and how much to boost/disable allocations for accounts with their own crawler. |
 | `Client Tier Matrix` | Defines tier min/max revenue, plus Accu base & ceiling allocations (ceiling is later multiplied by site size and crawler bonuses). |
 | `Semrush Caps` | Keyword caps per tier for paying vs non-paying accounts. |
 | `OnCrawl Starter Caps` | Base crawl budget defaults per tier (paying and non-paying). |
 | `Crawl Cadence Rules` | Default OnCrawl cadence strings. |
-| `Regional Band Multipliers` and `Market→Regional Band` | Associate markets with multipliers that influence contributor pool share. |
-| `Website Size Multipliers` | Multipliers tied to site size buckets; affect OnCrawl starters and increase AccuRanker ceilings. |
+| `Regional Band Multipliers` and `Market→Regional Band` | Associate markets with multipliers that influence the deterministic AccuRanker calculation. |
+| `Website Size Multipliers` | Multipliers tied to site size buckets; affect OnCrawl starters and grow the AccuRanker baseline. |
 | `Account→Site Size` | Overrides to map specific accounts to size buckets. |
 | `Account→Crawler Status` | Flags accounts that have their own crawler (skips OnCrawl and applies the Accu bonus). |
 | `Allocation Guidance` | Reference rows explaining how allocations are derived for stakeholders. |
@@ -70,7 +70,7 @@ The helper can be called manually from Apps Script or wired to a custom menu/tri
 
 ## Development Notes
 - Helper utilities (`safeStr_`, `toNumber_`, `getLastRow_`, etc.) keep parsing robust when spreadsheets contain blanks or formatted numbers.
-- The allocation algorithm enforces the AccuRanker capacity cap by scaling contributor allocations first, then base allocations, to stay under the buffer-adjusted ceiling.
+- The allocation algorithm now uses a deterministic “tier × size × region” formula plus optional bonuses, then reports how many Accu slots remain before hitting capacity.
 - All outputs rewrite their target sheets entirely, apply number formats, freeze headers, and re-create filters for easy analysis.
 
 ## Next Steps
