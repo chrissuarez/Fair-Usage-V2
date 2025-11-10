@@ -26,7 +26,7 @@ On spreadsheet open (`onOpen`), a **Tech Fee Tools** menu is added with three ac
 
 - **Refresh Fair-Usage Table** (`Build_FairUsage_ForYear`)  
   Rebuilds the `Tech Fair-Usage – {year}` sheet. It:
-  - Loads or creates the `Setup` tab and reads the deterministic allocation settings (tier base, site-size multiplier, regional band multiplier, tech-fee bonus, non-payer multiplier, and crawler bonus).
+  - Loads or creates the `Setup` tab and reads the deterministic allocation settings (tier base, site-size multiplier, tech-fee bonus, non-payer multiplier, and crawler bonus).
   - Calculates each account’s AccuRanker allocation directly from that matrix—no pooling—so SEO leads can see the same numbers you see in the Setup tab.
   - Tracks total Accu capacity, allocation consumed, and remaining “headroom” so you know when a plan upgrade is required as new clients onboard.
   - Derives Semrush keyword caps, OnCrawl cadence, and starter crawl budgets (skipping OnCrawl entirely for accounts flagged with their own crawler).
@@ -45,7 +45,6 @@ On spreadsheet open (`onOpen`), a **Tech Fee Tools** menu is added with three ac
 | `Semrush Caps` | Keyword caps per tier for paying vs non-paying accounts. |
 | `OnCrawl Starter Caps` | Base crawl budget defaults per tier (paying and non-paying). |
 | `Crawl Cadence Rules` | Default OnCrawl cadence strings. |
-| `Regional Band Multipliers` and `Market→Regional Band` | Associate markets with multipliers that influence the deterministic AccuRanker calculation. |
 | `Website Size Multipliers` | Multipliers tied to site size buckets; affect OnCrawl starters and grow the AccuRanker baseline. |
 | `Account→Site Size` | Legacy fallback to map specific accounts to size buckets. The new `Account Config` tab takes precedence when populated. |
 | `Account→Crawler Status` | Legacy fallback for crawler opt-outs. The new `Account Config` tab takes precedence when populated. |
@@ -61,7 +60,7 @@ Values can be edited directly in the sheet; the scripts read display values so f
 - `Active?` (boolean toggle to pause allocations mid-year)
 - `OneSearch Account?` and `OneSearch Extra Keywords`
 
-These per-account values override the legacy `Account→Site Size` and `Account→Crawler Status` blocks when present. Leaving a field blank falls back to the legacy tables (or default behavior). Use the `Active?` column to stop issuing allocations for churned clients and the OneSearch fields to grant a fixed keyword top-up on top of the deterministic tier/site/region math.
+These per-account values override the legacy `Account→Site Size` and `Account→Crawler Status` blocks when present. Leaving a field blank falls back to the legacy tables (or default behavior). Use the `Active?` column to stop issuing allocations for churned clients and the OneSearch fields to grant a fixed keyword top-up on top of the deterministic tier/site math.
 
 ## OnCrawl Budget Helper
 `populateOncrawlMonthlyBudget` (in `OnCrawlBuget.gs`) fills the `OnCrawl Monthly URL Budget` and `Budget Source` columns on the `Adjustments` sheet.
@@ -80,7 +79,7 @@ The helper can be called manually from Apps Script or wired to a custom menu/tri
 
 ## Development Notes
 - Helper utilities (`safeStr_`, `toNumber_`, `getLastRow_`, etc.) keep parsing robust when spreadsheets contain blanks or formatted numbers.
-- The allocation algorithm now uses a deterministic “tier × size × region” formula plus optional bonuses, then reports how many Accu slots remain before hitting capacity.
+- The allocation algorithm now uses a deterministic “tier × size” formula plus optional bonuses, then reports how many Accu slots remain before hitting capacity.
 - All outputs rewrite their target sheets entirely, apply number formats, freeze headers, and re-create filters for easy analysis.
 
 ## Next Steps
