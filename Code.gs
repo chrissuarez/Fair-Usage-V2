@@ -112,8 +112,9 @@ function Build_FairUsage_ForYear() {
   if (!seoSh) throw new Error(`Missing sheet: ${SEO_SHEET}`);
   if (!toolSh) throw new Error(`Missing sheet: ${TOOL_SHEET}`);
 
-  // Load Setup (this also CREATES it if missing)
+  // Load Setup + Account Config (these also create sheets if missing)
   const cfg = EnsureSetupTab_();
+  const accountCfg = EnsureAccountConfigTab_();
 
   // SEO
   const seoYearCol = SEO_YEAR_COLS[year];
@@ -138,24 +139,39 @@ function Build_FairUsage_ForYear() {
     if (acc) techByAccount.set(acc.toLowerCase(), tf || 0);
   });
 
-  // --- Tiering + account state (mark inactive if no revenue)
+  const accountOverrides = accountCfg.byAccount || {};
+
+  // --- Tiering + account state (mark inactive if no revenue or override)
   const rows = seoRows.map(r => {
     const revenue = Number(r.revenue) || 0;
-    const inactive = revenue <= 0;
+    const accountKey = r.account.toLowerCase();
+    const overrides = accountOverrides[accountKey] || {};
+
+    const activeFlag = overrides.active;
+    const forceActive = activeFlag === true;
+    const forceInactive = activeFlag === false;
+    const inactive = forceInactive || (!forceActive && revenue <= 0);
 
     // still look up tech fee, but inactive accounts won't get allocations
-    const accountKey = r.account.toLowerCase();
     const techFee = techByAccount.get(accountKey) || 0;
     const paying  = techFee > 0;
 
     // If inactive, force to "Inactive" with zero base/ceiling
     const tierObj = inactive ? { name:'Inactive', base:0, ceiling:0 } : inferTier_(revenue, cfg.tiers);
 
-    const siteSize = cfg.accountSiteSizes[accountKey] || 'Default';
+    const siteSizeOverride = overrides.siteSize || '';
+    const siteSize = siteSizeOverride || cfg.accountSiteSizes[accountKey] || 'Default';
     const siteMultiplier = cfg.siteSizeMultipliers && cfg.siteSizeMultipliers.hasOwnProperty(siteSize)
       ? cfg.siteSizeMultipliers[siteSize]
       : (cfg.siteSizeMultipliers && cfg.siteSizeMultipliers.Default != null ? cfg.siteSizeMultipliers.Default : 1);
-    const ownCrawler = !!cfg.accountCrawlerOptOut[accountKey];
+    const overrideOwnCrawler = overrides.ownCrawler;
+    const ownCrawler = overrideOwnCrawler != null
+      ? overrideOwnCrawler
+      : !!cfg.accountCrawlerOptOut[accountKey];
+    const oneSearchAccount = !!overrides.oneSearchAccount;
+    const oneSearchBonus = (!inactive && oneSearchAccount && overrides.oneSearchExtra > 0)
+      ? overrides.oneSearchExtra
+      : 0;
     const bonusRaw = ownCrawler ? (cfg.ownCrawlerAccuMult || 1) : 1;
     const bonusSafe = (isFinite(bonusRaw) && bonusRaw > 0) ? bonusRaw : 1;
     const tierCeilingAdj = Math.max(0, Math.round((tierObj.ceiling || 0) * bonusSafe));
@@ -167,6 +183,7 @@ function Build_FairUsage_ForYear() {
       techFee,
       paying,
       inactive,                 // <— new flag
+      active: !inactive,
       tier: tierObj.name,
       tierBase: tierObj.base,
       tierCeiling: tierObj.ceiling,
@@ -174,7 +191,9 @@ function Build_FairUsage_ForYear() {
       accuBonus: bonusSafe,
       siteSize,
       siteMultiplier: isFinite(siteMultiplier) ? siteMultiplier : 1,
-      ownCrawler
+      ownCrawler,
+      oneSearchAccount,
+      oneSearchBonus
     };
   });
 
@@ -205,6 +224,7 @@ function Build_FairUsage_ForYear() {
     if (r.inactive) {
       r.accuBase = 0;
       r.accuContributor = 0;
+      r.accuOneSearch = 0;
       r.accuTotal = 0;
       return;
     }
@@ -225,7 +245,8 @@ function Build_FairUsage_ForYear() {
     const ceiling = isFinite(r.accuCeiling) ? r.accuCeiling : r.tierCeiling;
     const headroom = Math.max(0, (ceiling || 0) - r.accuBase);
     r.accuContributor = Math.min(extra, headroom);
-    r.accuTotal = r.accuBase + r.accuContributor;
+    r.accuOneSearch = r.oneSearchBonus || 0;
+    r.accuTotal = r.accuBase + r.accuContributor + r.accuOneSearch;
   });
 
   // --- Enforce total ≤ totalTokens - buffer by reducing contributor first, then base
@@ -243,7 +264,7 @@ function Build_FairUsage_ForYear() {
       activeRows.forEach(r => {
         r.accuContributor = Math.floor((r.accuContributor || 0) * contributorScale);
         // recompute total but still respect ceiling (accuBase unchanged here)
-        r.accuTotal = (r.accuBase || 0) + r.accuContributor;
+        r.accuTotal = (r.accuBase || 0) + r.accuContributor + (r.accuOneSearch || 0);
       });
       totalAllocated = activeRows.reduce((s,r) => s + (r.accuTotal || 0), 0);
       if (totalAllocated <= available) return;
@@ -260,7 +281,7 @@ function Build_FairUsage_ForYear() {
         const ceiling = isFinite(r.accuCeiling) ? r.accuCeiling : r.tierCeiling;
         const headroom = Math.max(0, (ceiling || 0) - r.accuBase);
         r.accuContributor = Math.min(r.accuContributor || 0, headroom);
-        r.accuTotal = r.accuBase + r.accuContributor;
+        r.accuTotal = r.accuBase + r.accuContributor + (r.accuOneSearch || 0);
       });
       totalAllocated = activeRows.reduce((s,r) => s + (r.accuTotal || 0), 0);
     }
@@ -269,16 +290,16 @@ function Build_FairUsage_ForYear() {
     if (totalAllocated > available && totalAllocated > 0) {
       const finalScale = available / totalAllocated;
       activeRows.forEach(r => {
-        const newTotal = Math.floor((r.accuTotal || 0) * finalScale);
-        // preserve contributor/base ratio where possible
-        const contribRatio = (r.accuContributor || 0) / Math.max(1, r.accuTotal || 1);
-        r.accuContributor = Math.floor(newTotal * contribRatio);
-        r.accuBase = newTotal - r.accuContributor;
+        const adjustable = (r.accuBase || 0) + (r.accuContributor || 0);
+        const newAdjustable = Math.floor(adjustable * finalScale);
+        const contribRatio = adjustable > 0 ? (r.accuContributor || 0) / adjustable : 0;
+        r.accuContributor = Math.floor(newAdjustable * contribRatio);
+        r.accuBase = newAdjustable - r.accuContributor;
         // enforce ceiling
         const ceiling = isFinite(r.accuCeiling) ? r.accuCeiling : r.tierCeiling;
         const headroom = Math.max(0, (ceiling || 0) - r.accuBase);
         r.accuContributor = Math.min(r.accuContributor, headroom);
-        r.accuTotal = r.accuBase + r.accuContributor;
+        r.accuTotal = r.accuBase + r.accuContributor + (r.accuOneSearch || 0);
       });
     }
   })();
@@ -321,16 +342,17 @@ function Build_FairUsage_ForYear() {
   const outSh = getOrCreateSheet_(ss, outName);
   const header = [
     'Account','Market','Year',
-    'Tier','Site Size','Own Crawler?','Pays Tech Fee?','Revenue','Tech Fee',
-    'AccuRanker Base','AccuRanker Contributor','AccuRanker Total',
+    'Active?','Tier','Site Size','Own Crawler?','Pays Tech Fee?','Revenue','Tech Fee',
+    'AccuRanker Base','AccuRanker Contributor','OneSearch Bonus','AccuRanker Total',
     'OnCrawl Base','OnCrawl Contributor','OnCrawl Total',
     'Semrush Keyword Cap','OnCrawl Cadence'
   ];
   const out = [header];
   rows.forEach(r => out.push([
     r.account, r.market, year,
+    r.active ? 'Yes' : 'No',
     r.tier, r.siteSize, r.ownCrawler ? 'Yes':'No', r.paying ? 'Yes':'No', r.revenue, r.techFee,
-    r.accuBase, r.accuContributor, r.accuTotal,
+    r.accuBase, r.accuContributor, r.accuOneSearch || 0, r.accuTotal,
     // OnCrawl uses starter caps for now. Contributor logic can be added later.
     r.oncrawlBase, 0, r.oncrawlBase,
     r.semrushCap, r.oncrawlCadence
@@ -342,10 +364,10 @@ function Build_FairUsage_ForYear() {
   // Formatting
   outSh.getRange(1,1,1,header.length).setFontWeight('bold');
   if (out.length > 1) {
-    outSh.getRange(2,8,out.length-1,2).setNumberFormat('#,##0');      // revenue, tech fee
-    outSh.getRange(2,10,out.length-1,3).setNumberFormat('#,##0');     // AccuRanker numbers
-    outSh.getRange(2,13,out.length-1,3).setNumberFormat('#,##0');     // OnCrawl numbers
-    outSh.getRange(2,16,out.length-1,1).setNumberFormat('#,##0');     // Semrush cap
+    outSh.getRange(2,9,out.length-1,2).setNumberFormat('#,##0');      // revenue, tech fee
+    outSh.getRange(2,11,out.length-1,4).setNumberFormat('#,##0');     // AccuRanker numbers
+    outSh.getRange(2,15,out.length-1,3).setNumberFormat('#,##0');     // OnCrawl numbers
+    outSh.getRange(2,18,out.length-1,1).setNumberFormat('#,##0');     // Semrush cap
   }
   if (outSh.getFilter()) outSh.getFilter().remove();
   outSh.getRange(1,1,out.length,header.length).createFilter();
@@ -507,6 +529,50 @@ function EnsureSetupTab_(options) {
   };
 }
 
+function EnsureAccountConfigTab_() {
+  const ss = SpreadsheetApp.getActive();
+  const name = 'Account Config';
+  let sh = ss.getSheetByName(name);
+  if (!sh) {
+    sh = ss.insertSheet(name);
+    renderAccountConfigSheet_(sh);
+  }
+
+  if (sh.getLastRow() < 2) {
+    renderAccountConfigSheet_(sh);
+  }
+
+  const values = sh.getDataRange().getDisplayValues();
+  const byAccount = {};
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    const account = safeStr_(row[0]).toLowerCase();
+    if (!account) continue;
+
+    const siteSize = safeStr_(row[1]) || '';
+
+    const ownCrawlerStr = safeStr_(row[2]);
+    const ownCrawler = ownCrawlerStr ? parseYesNo_(ownCrawlerStr) : null;
+
+    const activeStr = safeStr_(row[3]);
+    const active = activeStr ? parseYesNo_(activeStr) : null;
+
+    const oneSearchStr = safeStr_(row[4]);
+    const oneSearchAccount = oneSearchStr ? parseYesNo_(oneSearchStr) : false;
+    const oneSearchExtra = toNumber_(row[5]);
+
+    byAccount[account] = {
+      siteSize: siteSize || null,
+      ownCrawler: ownCrawler,
+      active: active,
+      oneSearchAccount,
+      oneSearchExtra: isFinite(oneSearchExtra) ? oneSearchExtra : 0
+    };
+  }
+
+  return { sheet: sh, byAccount };
+}
+
 function renderSetupSheet_(sheet, state) {
   const keyValues = (state && state.keyValues) || {};
   const tableRows = (state && state.tableRows) || {};
@@ -565,6 +631,20 @@ function renderSetupSheet_(sheet, state) {
   sheet.getRange(1,1,rows.length,4).setValues(rows);
   sheet.setFrozenRows(1);
   for (let c=1;c<=4;c++) sheet.autoResizeColumn(c);
+}
+
+function renderAccountConfigSheet_(sheet) {
+  const rows = [
+    ['Account','Site Size','Own Crawler?','Active?','OneSearch Account?','OneSearch Extra Keywords','Notes'],
+    ['Nike EMEA (JF)','Large','Yes','Yes','No',0,'Fill this table with your accounts'],
+    ['Walgreens Boots Alliance','Large','Yes','Yes','No',0,''],
+    ['Swarovski AG','Large','No','Yes','Yes',10000,'Own crawler + OneSearch'],
+    ['Shawbrook Bank','Small','No','No','No',0,'']
+  ];
+  sheet.clear();
+  sheet.getRange(1,1,rows.length,rows[0].length).setValues(rows);
+  sheet.setFrozenRows(1);
+  for (let c=1; c<=rows[0].length; c++) sheet.autoResizeColumn(c);
 }
 
 function defaultSetupRenderState_() {

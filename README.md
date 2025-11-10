@@ -26,7 +26,7 @@ On spreadsheet open (`onOpen`), a **Tech Fee Tools** menu is added with three ac
 
 - **Refresh Fair-Usage Table** (`Build_FairUsage_ForYear`)  
   Rebuilds the `Tech Fair-Usage – {year}` sheet. It:
-  - Loads or creates the `Setup` tab and reads the deterministic allocation settings (tier base, site-size multiplier, tech-fee bonus, non-payer multiplier, and crawler bonus).
+  - Loads or creates the `Setup` and `Account Config` tabs, reading tier/site-size settings plus any per-account overrides (site size, crawler ownership, active flag, OneSearch bonus).
   - Calculates each account’s AccuRanker allocation directly from that matrix—no pooling—so SEO leads can see the same numbers you see in the Setup tab.
   - Tracks total Accu capacity, allocation consumed, and remaining “headroom” so you know when a plan upgrade is required as new clients onboard.
   - Derives Semrush keyword caps, OnCrawl cadence, and starter crawl budgets (skipping OnCrawl entirely for accounts flagged with their own crawler).
@@ -60,7 +60,7 @@ Values can be edited directly in the sheet; the scripts read display values so f
 - `Active?` (boolean toggle to pause allocations mid-year)
 - `OneSearch Account?` and `OneSearch Extra Keywords`
 
-These per-account values override the legacy `Account→Site Size` and `Account→Crawler Status` blocks when present. Leaving a field blank falls back to the legacy tables (or default behavior). Use the `Active?` column to stop issuing allocations for churned clients and the OneSearch fields to grant a fixed keyword top-up on top of the deterministic tier/site math.
+These per-account values override the legacy `Account→Site Size` and `Account→Crawler Status` blocks when present, and the builder reads this sheet on every refresh. Leaving a field blank falls back to the legacy tables (or default behavior). Use the `Active?` column to stop issuing allocations for churned clients (even if they still have revenue in the SEO sheet), and use the OneSearch columns to add a fixed keyword top-up on top of the deterministic tier/site math. The output sheet now includes `Active?` and `OneSearch Bonus` columns so stakeholders can trace those overrides.
 
 ## OnCrawl Budget Helper
 `populateOncrawlMonthlyBudget` (in `OnCrawlBuget.gs`) fills the `OnCrawl Monthly URL Budget` and `Budget Source` columns on the `Adjustments` sheet.
