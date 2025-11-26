@@ -1,0 +1,127 @@
+/**
+ * Tech Cashflow Projection Engine
+ * Analyzes client contracts to generate a month-by-month tech revenue forecast.
+ */
+
+function generateTechRunRate() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // 1. CONFIGURATION: Map these to your actual sheet names
+  const SOURCE_SHEET_NAME = "SEO Revenue from Closed Won Opps - Tech Fees Per Client"; 
+  const TARGET_SHEET_NAME = "Tech Cashflow Forecast 2025-26";
+  
+  // Define the timeline we want to project
+  const START_PROJECTION_DATE = new Date("2025-01-01");
+  const END_PROJECTION_DATE = new Date("2026-12-31");
+  
+  // 2. FETCH DATA
+  const sourceSheet = ss.getSheetByName(SOURCE_SHEET_NAME);
+  if (!sourceSheet) {
+    SpreadsheetApp.getUi().alert("Source sheet not found. Please check the name.");
+    return;
+  }
+  
+  // Get all data (assuming headers are in row 1)
+  const data = sourceSheet.getDataRange().getValues();
+  const headers = data.shift(); // Remove header row
+  
+  // Map column indexes (Zero-based). ADJUST THESE BASED ON YOUR CSV STRUCTURE
+  // Based on your file: "SEO Revenue from Closed Won Opps - Tech Fees Per Client.csv"
+  const COL_ACCOUNT = 0;       // Account Name
+  const COL_START = 2;         // Start Date
+  const COL_END = 3;           // End Date
+  const COL_TECH_FEE = 15;     // "Tech Fee (Final)" or similar column with the annual/total amount
+  const COL_MARKET = 9;        // Market
+  
+  // 3. PREPARE OUTPUT GRID
+  const monthHeaders = getMonthHeaders(START_PROJECTION_DATE, END_PROJECTION_DATE);
+  let outputRows = [];
+  
+  // 4. PROCESS EACH CLIENT
+  data.forEach(row => {
+    let clientName = row[COL_ACCOUNT];
+    let startDate = new Date(row[COL_START]);
+    let endDate = new Date(row[COL_END]);
+    let totalFee = parseCurrency(row[COL_TECH_FEE]);
+    let market = row[COL_MARKET];
+    
+    // Skip if no fee or invalid dates
+    if (!totalFee || totalFee === 0 || isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      return;
+    }
+    
+    // Calculate Monthly Run Rate (MRR) for this specific contract
+    let monthsDuration = monthDiff(startDate, endDate);
+    if (monthsDuration < 1) monthsDuration = 1;
+    let monthlyRevenue = totalFee / monthsDuration; // Assumes total fee is spread evenly
+    
+    // Or if the column is ALREADY monthly, use: let monthlyRevenue = totalFee;
+    
+    // Generate the row for the timeline
+    let clientRow = [clientName, market, startDate, endDate, totalFee, monthlyRevenue];
+    
+    // Loop through projection months and check if client is active
+    monthHeaders.dates.forEach(monthDate => {
+      if (monthDate >= startDate && monthDate <= endDate) {
+        clientRow.push(monthlyRevenue);
+      } else {
+        clientRow.push(0);
+      }
+    });
+    
+    outputRows.push(clientRow);
+  });
+  
+  // 5. RENDER OUTPUT
+  let targetSheet = ss.getSheetByName(TARGET_SHEET_NAME);
+  if (!targetSheet) {
+    targetSheet = ss.insertSheet(TARGET_SHEET_NAME);
+  } else {
+    targetSheet.clear(); // Clear old data
+  }
+  
+  // Set Headers
+  let finalHeaders = ["Client", "Market", "Start Date", "End Date", "Total Fee", "Monthly Revenue", ...monthHeaders.labels];
+  targetSheet.getRange(1, 1, 1, finalHeaders.length).setValues([finalHeaders]).setFontWeight("bold").setBackground("#EFEFEF");
+  
+  // Set Data
+  if (outputRows.length > 0) {
+    targetSheet.getRange(2, 1, outputRows.length, finalHeaders.length).setValues(outputRows);
+  }
+  
+  // Formatting
+  targetSheet.getRange(2, 5, outputRows.length, finalHeaders.length - 4).setNumberFormat("$#,##0.00");
+  targetSheet.setFrozenRows(1);
+  targetSheet.setFrozenColumns(1);
+}
+
+// --- HELPER FUNCTIONS ---
+
+function getMonthHeaders(startDate, endDate) {
+  let dates = [];
+  let labels = [];
+  let dt = new Date(startDate);
+  
+  while (dt <= endDate) {
+    dates.push(new Date(dt));
+    labels.push(Utilities.formatDate(dt, Session.getScriptTimeZone(), "MMM yyyy"));
+    dt.setMonth(dt.getMonth() + 1);
+  }
+  return { dates: dates, labels: labels };
+}
+
+function monthDiff(d1, d2) {
+  let months;
+  months = (d2.getFullYear() - d1.getFullYear()) * 12;
+  months -= d1.getMonth();
+  months += d2.getMonth();
+  return months <= 0 ? 0 : months + 1; // +1 to include the starting month
+}
+
+function parseCurrency(value) {
+  if (typeof value === 'number') return value;
+  if (!value) return 0;
+  // Remove currency symbols and commas
+  let clean = value.toString().replace(/[$,£€]/g, '').replace(/,/g, '');
+  return parseFloat(clean) || 0;
+}

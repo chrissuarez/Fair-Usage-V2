@@ -2,11 +2,18 @@
  * MENU
  *************************/
 function onOpen() {
-  SpreadsheetApp.getUi()
+  const ui = SpreadsheetApp.getUi();
+
+  ui
     .createMenu('Tech Fee Tools')
     .addItem('Build Tech Fee Join', 'Build_Tech_Fee_Join')      // restored
     .addItem('Refresh Fair-Usage Table', 'Build_FairUsage_ForYear')
     .addItem('Create/Update Setup Tab', 'EnsureSetupTab_')
+    .addToUi();
+
+  ui
+    .createMenu('Cashflow Tools')
+    .addItem('Generate Tech Run Rate', 'generateTechRunRate')
     .addToUi();
 }
 
