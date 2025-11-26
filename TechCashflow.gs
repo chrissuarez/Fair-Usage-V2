@@ -8,7 +8,9 @@ function generateTechRunRate() {
   const ui = SpreadsheetApp.getUi();
   
   // 1. CONFIGURATION: Map these to your actual sheet names
-  const SOURCE_SHEET_NAME = "SEO Revenue from Closed Won Opps - Tech Fees Per Client"; 
+  const SOURCE_SHEET_NAME = "SEO Revenue from Closed Won Opps - Tech Fees Per Client";
+  const SOURCE_SPREADSHEET_ID = "1frMM58KKBphwfQewFrNs01Ob4FB3ntX782JVpT8weWU";
+  const SOURCE_TAB_NAME = "Tech Fees Per Client";
   const TARGET_SHEET_NAME = "Tech Cashflow Forecast 2025-26";
   
   // Define the timeline we want to project
@@ -16,7 +18,10 @@ function generateTechRunRate() {
   const END_PROJECTION_DATE = new Date("2026-12-31");
   
   // 2. FETCH DATA
-  const sourceSheet = getSheetOrPrompt_(ss, ui, SOURCE_SHEET_NAME, "Source sheet not found. Enter the correct source sheet name.");
+  // Try to locate or mirror the source tab from the external workbook
+  const sourceSheet =
+    ss.getSheetByName(SOURCE_SHEET_NAME) ||
+    syncExternalSheet_(ss, ui, SOURCE_SHEET_NAME, SOURCE_SPREADSHEET_ID, SOURCE_TAB_NAME);
   
   // Get all data (assuming headers are in row 1)
   const data = sourceSheet.getDataRange().getValues();
@@ -137,4 +142,27 @@ function getSheetOrPrompt_(ss, ui, preferredName, promptMessage) {
   const sh = ss.getSheetByName(name);
   if (!sh) throw new Error(`Sheet "${name}" not found. Check the name and try again.`);
   return sh;
+}
+
+// Pulls data from another spreadsheet tab into a local sheet (overwrite/replace).
+function syncExternalSheet_(ss, ui, localName, externalSpreadsheetId, externalTabName) {
+  try {
+    const extSs = SpreadsheetApp.openById(externalSpreadsheetId);
+    const extSheet = extSs.getSheetByName(externalTabName);
+    if (!extSheet) {
+      ui.alert(`External tab "${externalTabName}" not found in the source workbook.`);
+      throw new Error('External tab missing');
+    }
+    const data = extSheet.getDataRange().getValues();
+    if (!data.length) throw new Error('External tab is empty');
+
+    let local = ss.getSheetByName(localName);
+    if (!local) local = ss.insertSheet(localName);
+    local.clearContents();
+    local.getRange(1, 1, data.length, data[0].length).setValues(data);
+    return local;
+  } catch (err) {
+    ui.alert('Unable to import source tab. Please ensure you have access to the source spreadsheet and the tab name is correct.');
+    throw err;
+  }
 }
