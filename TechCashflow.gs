@@ -5,6 +5,7 @@
 
 function generateTechRunRate() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ui = SpreadsheetApp.getUi();
   
   // 1. CONFIGURATION: Map these to your actual sheet names
   const SOURCE_SHEET_NAME = "SEO Revenue from Closed Won Opps - Tech Fees Per Client"; 
@@ -15,11 +16,7 @@ function generateTechRunRate() {
   const END_PROJECTION_DATE = new Date("2026-12-31");
   
   // 2. FETCH DATA
-  const sourceSheet = ss.getSheetByName(SOURCE_SHEET_NAME);
-  if (!sourceSheet) {
-    SpreadsheetApp.getUi().alert("Source sheet not found. Please check the name.");
-    return;
-  }
+  const sourceSheet = getSheetOrPrompt_(ss, ui, SOURCE_SHEET_NAME, "Source sheet not found. Enter the correct source sheet name.");
   
   // Get all data (assuming headers are in row 1)
   const data = sourceSheet.getDataRange().getValues();
@@ -124,4 +121,20 @@ function parseCurrency(value) {
   // Remove currency symbols and commas
   let clean = value.toString().replace(/[$,£€]/g, '').replace(/,/g, '');
   return parseFloat(clean) || 0;
+}
+
+// If the preferred sheet is missing, prompt the user and show available sheet names.
+function getSheetOrPrompt_(ss, ui, preferredName, promptMessage) {
+  const preferred = ss.getSheetByName(preferredName);
+  if (preferred) return preferred;
+
+  const names = ss.getSheets().map(sh => sh.getName()).join(', ');
+  const resp = ui.prompt('Sheet not found', `${promptMessage}\n\nPreferred: "${preferredName}"\nAvailable sheets: ${names}`, ui.ButtonSet.OK_CANCEL);
+  if (resp.getSelectedButton() !== ui.Button.OK) {
+    throw new Error('Canceled: sheet selection required.');
+  }
+  const name = (resp.getResponseText() || '').trim();
+  const sh = ss.getSheetByName(name);
+  if (!sh) throw new Error(`Sheet "${name}" not found. Check the name and try again.`);
+  return sh;
 }
