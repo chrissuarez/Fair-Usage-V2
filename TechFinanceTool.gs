@@ -156,18 +156,20 @@ function buildDashboard() {
   // --- SECTION B: PIPELINE ---
   sheet.getRange("F1").setValue("2. Tech Pipeline (Predicted Revenue)").setTextStyle(titleStyle);
   const pipelineData = [
-    ["Client Target", "Est. Tech Fee", "Probability", "Weighted Value"],
-    ["Puma Renewal", 500, 0.9, "=G3*H3"],
-    ["The AA Upsell", 500, 0.5, "=G4*H4"],
-    ["Deckers AIO Pitch", 500, 0.2, "=G5*H5"],
-    ["Pipeline Total", "", "", "=SUM(I3:I5)"]
+    ["Client Target", "Est. Tech Fee", "Probability", "Weighted Value", "Start Month", "End Month"],
+    ["Puma Renewal", 500, 0.9, "=G3*H3", new Date("2025-02-01"), new Date("2025-12-31")],
+    ["The AA Upsell", 500, 0.5, "=G4*H4", new Date("2025-04-01"), new Date("2025-06-30")],
+    ["Deckers AIO Pitch", 500, 0.2, "=G5*H5", new Date("2026-01-01"), new Date("2026-12-31")],
+    ["Pipeline Total", "", "", "=SUM(I3:I5)", "", ""]
   ];
-  sheet.getRange("F2:I6").setValues(pipelineData);
-  sheet.getRange("F2:I2").setFontWeight("bold").setBackground(headerRowColor);
+  sheet.getRange("F2:K6").setValues(pipelineData);
+  sheet.getRange("F2:K2").setFontWeight("bold").setBackground(headerRowColor);
   sheet.getRange("G3:G5").setNumberFormat("$#,##0");
   sheet.getRange("H3:H5").setNumberFormat("0%");
   sheet.getRange("I3:I6").setNumberFormat("$#,##0");
-  sheet.getRange("F6:I6").setBackground(revenueColor).setFontWeight("bold");
+  sheet.getRange("J3:K5").setNumberFormat("mmm-yyyy");
+  sheet.getRange("F2:K6").setBorder(true, true, true, true, true, true);
+  sheet.getRange("F6:K6").setBackground(revenueColor).setFontWeight("bold");
 
   // --- SECTION C: FORECAST ---
   sheet.getRange("A9").setValue("3. Cashflow Forecast (Tool Revenue vs Cost)").setTextStyle(titleStyle);
@@ -190,15 +192,14 @@ function buildDashboard() {
   
   colLetters.forEach((col, index) => {
     let year = currentDate.getFullYear();
-    let monthLabel = Utilities.formatDate(currentDate, Session.getScriptTimeZone(), "MMM-yy");
     let is2026 = year === 2026;
     let burnCell = is2026 ? "$C$5" : "$B$5";
     let myCol = columnToLetter(index + 2); // Start at B
     
-    formulaData[0].push(monthLabel);
+    formulaData[0].push(new Date(currentDate)); // Store date, format after set
     formulaData[1].push(`=${burnCell}`); // Burn
     formulaData[2].push(`=SUM('${DATA_SHEET_NAME}'!${col}2:${col})`); // Revenue (skip header row)
-    formulaData[3].push(`=$I$6`); // Pipeline
+    formulaData[3].push(`=SUMPRODUCT(($J$3:$J$5<=${myCol}${startRow})*($J$3:$J$5<>"")*(($K$3:$K$5="")+($K$3:$K$5>=${myCol}${startRow}))*$I$3:$I$5)`); // Pipeline active window
     formulaData[4].push(`=(${myCol}${startRow+2}+${myCol}${startRow+3})-${myCol}${startRow+1}`); // Surplus
     
     // Cumulative
@@ -209,6 +210,7 @@ function buildDashboard() {
   });
   
   sheet.getRange(startRow, 2, 6, 24).setValues(formulaData);
+  sheet.getRange(startRow, 2, 1, 24).setNumberFormat("MMM-yy");
   sheet.getRange(startRow+1, 2, 5, 24).setNumberFormat("$#,##0");
   
   // Conditional Formatting (Cumulative Row)
@@ -220,9 +222,10 @@ function buildDashboard() {
   sheet.setFrozenColumns(1);
   
   // --- GO LIVE PREDICTOR ---
-  sheet.getRange("K2").setValue("EARLIEST 2026 UPGRADE MONTH").setFontWeight("bold");
+  // Place go-live indicator outside the pipeline table to avoid circular refs with start/end months
+  sheet.getRange("M2").setValue("EARLIEST 2026 UPGRADE MONTH").setFontWeight("bold");
   const goLiveFormula = `=IFERROR(INDEX(N${startRow}:Y${startRow}, MATCH(TRUE, N${startRow+5}:Y${startRow+5} >= 0, 0)), "Insufficient Funds in 2026")`;
-  sheet.getRange("K3").setFormula(goLiveFormula)
+  sheet.getRange("M3").setFormula(goLiveFormula)
        .setFontWeight("bold").setFontSize(14).setBackground("#fff2cc")
        .setBorder(true, true, true, true, true, true).setHorizontalAlignment("center");
   sheet.setColumnWidth(1, 220);
