@@ -1,0 +1,13 @@
+# Local Clasp Config
+.clasp.json
+
+# Backups
+BACKUP - Copy.gs
+
+# Generated/Duplicate Files
+OncrawlBudget.js
+Code.js
+
+# OS Files
+.DS_Store
+Thumbs.db

@@ -358,7 +358,7 @@ function EnsureSetupTab_(options) {
   const accuRankerCaps = {};
   readTable_(values, 'AccuRanker Caps', row => {
     if (row[0] && row[1] && row[2]) {
-      accuRankerCaps[row[0]] = { nonpaying: parseInt(row[1], 10), paying: parseInt(row[2], 10) };
+      accuRankerCaps[row[0]] = { nonpaying: toNumber_(row[1]), paying: toNumber_(row[2]) };
     }
   });
 
@@ -366,7 +366,7 @@ function EnsureSetupTab_(options) {
   const semrushCaps = {};
   readTable_(values, 'Semrush Caps', row => {
     if (row[0] && row[1] && row[2]) {
-      semrushCaps[row[0]] = { nonpaying: parseInt(row[1], 10), paying: parseInt(row[2], 10) };
+      semrushCaps[row[0]] = { nonpaying: toNumber_(row[1]), paying: toNumber_(row[2]) };
     }
   });
 
@@ -382,7 +382,7 @@ function EnsureSetupTab_(options) {
   const oncrawlCaps = {};
   readTable_(values, 'OnCrawl Starter Caps', row => {
     if (row[0] && /Tier/.test(row[0]) && row[1] && row[2]) {
-      oncrawlCaps[row[0]] = { nonpaying: parseInt(row[1], 10), paying: parseInt(row[2], 10) };
+      oncrawlCaps[row[0]] = { nonpaying: toNumber_(row[1]), paying: toNumber_(row[2]) };
     }
   });
 
