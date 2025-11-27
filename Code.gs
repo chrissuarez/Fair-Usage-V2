@@ -6,7 +6,7 @@ function onOpen() {
 
   ui
     .createMenu('Tech Fee Tools')
-    .addItem('Build Tech Fee Join', 'Build_Tech_Fee_Join')      // restored
+    .addItem('Build Tech Fee Join', 'Build_Tech_Fee_Join')
     .addItem('Refresh Fair-Usage Table', 'Build_FairUsage_ForYear')
     .addItem('Create/Update Setup Tab', 'EnsureSetupTab_')
     .addToUi();
@@ -18,10 +18,24 @@ function onOpen() {
 }
 
 /*************************
- * 1) REVENUE vs TECH FEE JOIN (restored)
+ * WEB APP
  *************************/
-function Build_Tech_Fee_Join() {
-  const ui = SpreadsheetApp.getUi();
+function doGet(e) {
+  return HtmlService.createTemplateFromFile('index')
+    .evaluate()
+    .setTitle('Fair Usage Tool')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+function include(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename)
+    .getContent();
+}
+
+/*************************
+ * 1) REVENUE vs TECH FEE JOIN
+ *************************/
+function Build_Tech_Fee_Join(yearArg) {
   const ss = SpreadsheetApp.getActive();
 
   // Tab names in your file
@@ -34,11 +48,19 @@ function Build_Tech_Fee_Join() {
   const TOOL_START_ROW = 5;                       // headers row 4
   const TOOL_YEAR_COLS = { 2024: 2, 2025: 3, 2026: 4 };
 
-  // Ask year
-  const resp = ui.prompt('Choose Year', 'Enter 2024, 2025, or 2026 (default 2026):', ui.ButtonSet.OK_CANCEL);
-  if (resp.getSelectedButton() !== ui.Button.OK) return;
-  const year = parseInt((resp.getResponseText() || '2025').trim(), 10);
-  if (![2024, 2025, 2026].includes(year)) { ui.alert('Invalid year.'); return; }
+  let year = yearArg;
+  if (!year) {
+    // Ask year
+    const ui = SpreadsheetApp.getUi();
+    const resp = ui.prompt('Choose Year', 'Enter 2024, 2025, or 2026 (default 2026):', ui.ButtonSet.OK_CANCEL);
+    if (resp.getSelectedButton() !== ui.Button.OK) return;
+    year = parseInt((resp.getResponseText() || '2025').trim(), 10);
+  }
+
+  if (![2024, 2025, 2026].includes(year)) {
+    if (!yearArg) SpreadsheetApp.getUi().alert('Invalid year.');
+    throw new Error('Invalid year selected.');
+  }
 
   // Get sheets
   const seoSh = ss.getSheetByName(SEO_SHEET);
@@ -92,14 +114,16 @@ function Build_Tech_Fee_Join() {
 
   // use local ss variable (consistent) instead of SpreadsheetApp.getActiveSpreadsheet()
   ss.setActiveSheet(outSh);
-  ui.alert(`Done. Wrote ${out.length - 1} rows to "${outName}".`);
+
+  const msg = `Done. Wrote ${out.length - 1} rows to "${outName}".`;
+  if (!yearArg) SpreadsheetApp.getUi().alert(msg);
+  return msg;
 }
 
 /*************************
  * 2) FAIR-USAGE BUILDER (uses Setup tab)
  *************************/
-function Build_FairUsage_ForYear() {
-  const ui = SpreadsheetApp.getUi();
+function Build_FairUsage_ForYear(yearArg) {
   const ss = SpreadsheetApp.getActive();
 
   const SEO_SHEET = 'SEO Client Revenue';
@@ -109,10 +133,18 @@ function Build_FairUsage_ForYear() {
   const TOOL_START_ROW = 5;
   const TOOL_YEAR_COLS = { 2024: 2, 2025: 3, 2026: 4 };
 
-  const resp = ui.prompt('Choose Year', 'Enter 2024, 2025, or 2026 (default 2025):', ui.ButtonSet.OK_CANCEL);
-  if (resp.getSelectedButton() !== ui.Button.OK) return;
-  const year = parseInt((resp.getResponseText() || '2025').trim(), 10);
-  if (![2024, 2025, 2026].includes(year)) { ui.alert('Invalid year.'); return; }
+  let year = yearArg;
+  if (!year) {
+    const ui = SpreadsheetApp.getUi();
+    const resp = ui.prompt('Choose Year', 'Enter 2024, 2025, or 2026 (default 2025):', ui.ButtonSet.OK_CANCEL);
+    if (resp.getSelectedButton() !== ui.Button.OK) return;
+    year = parseInt((resp.getResponseText() || '2025').trim(), 10);
+  }
+
+  if (![2024, 2025, 2026].includes(year)) {
+    if (!yearArg) SpreadsheetApp.getUi().alert('Invalid year.');
+    throw new Error('Invalid year selected.');
+  }
 
   const seoSh = ss.getSheetByName(SEO_SHEET);
   const toolSh = ss.getSheetByName(TOOL_SHEET);
@@ -306,12 +338,15 @@ function Build_FairUsage_ForYear() {
 
   // use local ss variable (consistent) instead of SpreadsheetApp.getActiveSpreadsheet()
   ss.setActiveSheet(outSh);
-  ui.alert(`Built "${outName}" with ${rows.length} accounts.`);
+
+  const msg = `Built "${outName}" with ${rows.length} accounts.`;
+  if (!yearArg) SpreadsheetApp.getUi().alert(msg);
+  return msg;
 }
 
 /*************************
-* 3) SETUP TAB (creates or updates, with 4 cols padding)
-*************************/
+ * 3) SETUP TAB (creates or updates, with 4 cols padding)
+ *************************/
 function EnsureSetupTab_(options) {
   const opts = options || {};
   const ss = SpreadsheetApp.getActive();
@@ -707,6 +742,26 @@ function parseYesNo_(value) {
 }
 
 /*************************
+ * WEB APP WRAPPERS
+ *************************/
+function Build_FairUsage_ForYear_Web(year) {
+  return Build_FairUsage_ForYear(year);
+}
+
+function Build_Tech_Fee_Join_Web(year) {
+  return Build_Tech_Fee_Join(year);
+}
+
+function EnsureSetupTab_Web() {
+  EnsureSetupTab_();
+  return "Setup tab updated.";
+}
+
+function getCashflowData_Web() {
+  return getCashflowData();
+}
+
+/*************************
  * HELPERS
  *************************/
 function inferTier_(revenue, tiers) {
@@ -742,3 +797,59 @@ function getLastRow_(sheet, col, startRow) {
 function getOrCreateSheet_(ss, name) { let sh = ss.getSheetByName(name); if (!sh) sh = ss.insertSheet(name); return sh; }
 function safeStr_(v) { return (v == null ? '' : String(v)).trim(); }
 function toNumber_(v) { const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/,/g, '')); return isFinite(n) ? n : 0; }
+
+/*************************
+ * 4) CASHFLOW DASHBOARD DATA
+ *************************/
+function getCashflowData() {
+  const ss = SpreadsheetApp.getActive();
+  const SHEET_NAME = "Tech Cashflow Forecast 2025-26";
+  const sh = ss.getSheetByName(SHEET_NAME);
+
+  if (!sh) {
+    throw new Error(`Sheet "${SHEET_NAME}" not found. Please run "Generate Tech Run Rate" from the menu first.`);
+  }
+
+  const data = sh.getDataRange().getValues();
+  const headers = data[0];
+
+  // Find month columns (starting from col 6, index 6)
+  // Headers: Client, Market, Start, End, Total, Monthly, Jan-25, Feb-25...
+  const monthStartIndex = 6;
+  const months = headers.slice(monthStartIndex).map(d => {
+    // Format date as "MMM-yy"
+    return Utilities.formatDate(new Date(d), Session.getScriptTimeZone(), "MMM-yy");
+  });
+
+  // Calculate Total Revenue per Month
+  const revenue = new Array(months.length).fill(0);
+
+  // Skip header
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    for (let m = 0; m < months.length; m++) {
+      const val = row[monthStartIndex + m];
+      if (typeof val === 'number') {
+        revenue[m] += val;
+      }
+    }
+  }
+
+  // Default Costs (Burn Rate) - Hardcoded for now based on DashboardBuilder
+  // In a real scenario, this could be read from a config sheet
+  const defaultCosts = new Array(months.length).fill(13144); // Base stack cost
+
+  // Add upgrade cost in 2026 (assuming months start Jan 2025)
+  // 2026 starts at index 12
+  for (let m = 12; m < months.length; m++) {
+    if (m < defaultCosts.length) {
+      defaultCosts[m] += 3000; // Add upgrade cost
+    }
+  }
+
+  return {
+    months: months,
+    revenue: revenue,
+    costs: defaultCosts
+  };
+}

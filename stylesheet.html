@@ -1,0 +1,283 @@
+<style>
+    /* 
+  JELLYFISH DIGITAL STYLE GUIDE IMPLEMENTATION 
+  Theme: Dark Mode, Gold Accents, "Digital Nerve Center"
+*/
+
+    :root {
+        --jf-black: #000000;
+        --jf-gold: #FFB71B;
+        --jf-white: #FFFFFF;
+        --surface-dark: #121212;
+        --surface-card: #1E1E1E;
+        --surface-border: #333333;
+        --text-grey: #AAAAAA;
+
+        --font-display: 'Big Shoulders Display', sans-serif;
+        --font-body: 'DM Sans', sans-serif;
+    }
+
+    * {
+        box-sizing: border-box;
+    }
+
+    body {
+        margin: 0;
+        padding: 0;
+        background-color: var(--jf-black);
+        color: var(--jf-white);
+        font-family: var(--font-body);
+        font-size: 16px;
+        height: 100vh;
+        overflow: hidden;
+        /* App-like feel */
+    }
+
+    /* TYPOGRAPHY */
+    h1,
+    h2,
+    h3 {
+        font-family: var(--font-display);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin: 0;
+    }
+
+    h1 {
+        font-size: 32px;
+        font-weight: 800;
+    }
+
+    h2 {
+        font-size: 48px;
+        font-weight: 700;
+        line-height: 1;
+        margin-bottom: 8px;
+    }
+
+    h3 {
+        font-size: 24px;
+        font-weight: 700;
+        margin-bottom: 16px;
+        color: var(--jf-white);
+    }
+
+    .subtitle {
+        color: var(--text-grey);
+        font-size: 18px;
+        margin-top: 0;
+        margin-bottom: 32px;
+    }
+
+    .gold-text {
+        color: var(--jf-gold);
+    }
+
+    /* LAYOUT */
+    .app-container {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+    }
+
+    .app-header {
+        height: 80px;
+        background-color: var(--jf-black);
+        border-bottom: 1px solid var(--surface-border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 32px;
+        flex-shrink: 0;
+    }
+
+    .logo-area {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .logo-icon {
+        width: 32px;
+        height: 32px;
+        background-color: var(--jf-gold);
+        border-radius: 50%;
+        /* Placeholder for logo */
+    }
+
+    .user-info {
+        font-family: var(--font-display);
+        font-weight: 700;
+        letter-spacing: 1px;
+        color: var(--text-grey);
+    }
+
+    .main-layout {
+        display: flex;
+        flex: 1;
+        overflow: hidden;
+    }
+
+    /* SIDEBAR */
+    .sidebar {
+        width: 240px;
+        background-color: var(--surface-dark);
+        border-right: 1px solid var(--surface-border);
+        padding: 32px 0;
+        flex-shrink: 0;
+    }
+
+    .nav-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .nav-item {
+        padding: 16px 32px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: var(--text-grey);
+        transition: all 0.2s ease;
+        border-left: 3px solid transparent;
+    }
+
+    .nav-item:hover {
+        background-color: rgba(255, 255, 255, 0.05);
+        color: var(--jf-white);
+    }
+
+    .nav-item.active {
+        background-color: rgba(255, 183, 27, 0.1);
+        color: var(--jf-gold);
+        border-left-color: var(--jf-gold);
+    }
+
+    .nav-text {
+        font-weight: 500;
+        font-size: 16px;
+    }
+
+    /* CONTENT AREA */
+    .content-area {
+        flex: 1;
+        padding: 48px;
+        overflow-y: auto;
+        background: radial-gradient(circle at top right, rgba(30, 30, 30, 0.4) 0%, rgba(0, 0, 0, 0) 50%);
+    }
+
+    .content-section {
+        display: none;
+        animation: fadeIn 0.3s ease-in-out;
+
+        .form-group label {
+            display: block;
+            color: var(--text-grey);
+            font-size: 14px;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .input-select {
+            width: 100%;
+            background-color: var(--jf-black);
+            border: 1px solid var(--surface-border);
+            color: var(--jf-white);
+            padding: 12px 16px;
+            border-radius: 6px;
+            font-family: var(--font-body);
+            font-size: 16px;
+            appearance: none;
+            /* Custom arrow could be added */
+            background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23FFB71B%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E");
+            background-repeat: no-repeat;
+            background-position: right 16px top 50%;
+            background-size: 12px auto;
+        }
+
+        .input-select:focus {
+            outline: none;
+            border-color: var(--jf-gold);
+        }
+
+        /* BUTTONS */
+        .btn-primary {
+            background-color: var(--jf-gold);
+            color: var(--jf-black);
+            font-family: var(--font-body);
+            font-weight: 700;
+            text-transform: uppercase;
+            border: none;
+            border-radius: 6px;
+            padding: 14px 28px;
+            cursor: pointer;
+            width: 100%;
+            transition: background-color 0.2s;
+        }
+
+        .btn-primary:hover {
+            background-color: #E5A518;
+        }
+
+        .btn-secondary {
+            background-color: transparent;
+            color: var(--jf-gold);
+            border: 1px solid var(--jf-gold);
+            font-family: var(--font-body);
+            font-weight: 700;
+            text-transform: uppercase;
+            border-radius: 6px;
+            padding: 14px 28px;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.2s;
+        }
+
+        .btn-secondary:hover {
+            background-color: rgba(255, 183, 27, 0.1);
+        }
+
+        /* STATUS MESSAGES */
+        .status-message {
+            margin-top: 16px;
+            font-size: 14px;
+            min-height: 20px;
+        }
+
+        .status-success {
+            color: #27AE60;
+        }
+
+        .status-error {
+            color: #EB5757;
+        }
+
+        .status-loading {
+            color: var(--jf-gold);
+        }
+
+        /* STATS */
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .stat-row:last-child {
+            border-bottom: none;
+        }
+
+        .stat-label {
+            color: var(--text-grey);
+        }
+
+        .stat-value {
+            font-family: var(--font-display);
+            font-weight: 700;
+            font-size: 20px;
+        }
+</style>

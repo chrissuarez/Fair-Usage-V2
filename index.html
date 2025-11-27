@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <base target="_top">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fair Usage Control</title>
+    <!-- Chart.js for Cashflow Dashboard -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=DM+Sans:wght@400;500;700&display=swap"
+        rel="stylesheet">
+
+    <?!= include('stylesheet'); ?>
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo-area">
+                <div class="logo-icon"></div>
+                <h1>FAIR USAGE <span class="gold-text">CONTROL</span></h1>
+            </div>
+            <div class="user-info">
+                <span>ADMIN</span>
+            </div>
+        </header>
+
+        <!-- Main Layout -->
+        <div class="main-layout">
+            <!-- Sidebar Navigation -->
+            <nav class="sidebar">
+                <ul class="nav-list">
+                    <li class="nav-item active" onclick="showSection('fair-usage')">
+                        <span class="nav-icon">📊</span>
+                        <span class="nav-text">Fair Usage</span>
+                    </li>
+                    <li class="nav-item" onclick="showSection('tech-fee')">
+                        <span class="nav-icon">💰</span>
+                        <span class="nav-text">Tech Fee</span>
+                    </li>
+                    <li class="nav-item" onclick="showSection('cashflow')">
+                        <span class="nav-icon">📈</span>
+                        <span class="nav-text">Cashflow</span>
+                    </li>
+                    <li class="nav-item" onclick="showSection('settings')">
+                        <span class="nav-icon">⚙️</span>
+                        <span class="nav-text">Settings</span>
+                    </li>
+                </ul>
+            </nav>
+
+            <!-- Content Area -->
+            <main class="content-area">
+
+                <!-- Fair Usage Section -->
+                <section id="fair-usage-section" class="content-section active">
+                    <div class="section-header">
+                        <h2>Fair Usage Generation</h2>
+                        <p class="subtitle">Generate allocation tables based on revenue tiers</p>
+                    </div>
+
+                    <div class="card-grid">
+                        <div class="card action-card">
+                            <h3>Build Allocation Table</h3>
+                            <p>Generates the "Tech Fair-Usage" tab for the selected year.</p>
+
+                            <div class="form-group">
+                                <label for="fu-year">Select Year</label>
+                                <select id="fu-year" class="input-select">
+                                    <option value="2024">2024</option>
+                                    <option value="2025" selected>2025</option>
+                                    <option value="2026">2026</option>
+                                </select>
+                            </div>
+
+                            <button class="btn-primary" onclick="runFairUsage()">
+                                Initialize Build
+                            </button>
+                            <div id="fu-status" class="status-message"></div>
+                        </div>
+
+                        <div class="card info-card">
+                            <h3>Current Config</h3>
+                            <div class="stat-row">
+                                <span class="stat-label">AccuRanker Cap</span>
+                                <span class="stat-value gold-text">100k</span>
+                            </div>
+                            <div class="stat-row">
+                                <span class="stat-label">Own Crawler Mult</span>
+                                <span class="stat-value">1.25x</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Tech Fee Section -->
+                <section id="tech-fee-section" class="content-section">
+                    <div class="section-header">
+                        <h2>Tech Fee Reconciliation</h2>
+                        <p class="subtitle">Compare SEO Revenue vs Tech Fee Revenue</p>
+                    </div>
+
+                    <div class="card-grid">
+                        <div class="card action-card">
+                            <h3>Build Comparison</h3>
+                            <p>Generates "Revenue vs Tech Fee" tab.</p>
+
+                            <div class="form-group">
+                                <label for="tf-year">Select Year</label>
+                                <select id="tf-year" class="input-select">
+                                    <option value="2024">2024</option>
+                                    <option value="2025" selected>2025</option>
+                                    <option value="2026">2026</option>
+                                </select>
+                            </div>
+
+                            <button class="btn-primary" onclick="runTechFee()">
+                                Run Comparison
+                            </button>
+                            <div id="tf-status" class="status-message"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- CASHFLOW SECTION -->
+                <section id="cashflow-section" class="content-section" style="display:none;">
+                    <div class="section-header">
+                        <h2>CASHFLOW DASHBOARD</h2>
+                        <p class="subtitle">Revenue vs. Burn Rate & Scenario Planning</p>
+                    </div>
+
+                    <!-- Chart Container -->
+                    <div class="card full-width-card" style="margin-bottom: 24px;">
+                        <div class="chart-container" style="position: relative; height:400px; width:100%">
+                            <canvas id="cashflowChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Scenario Builder -->
+                    <div class="grid-2">
+                        <!-- Add Tool Scenario -->
+                        <div class="card">
+                            <h3>ADD NEW TOOL</h3>
+                            <p>Simulate buying a new tool.</p>
+
+                            <div class="form-group">
+                                <label>Tool Name</label>
+                                <input type="text" id="scenario-tool-name" placeholder="e.g. Ahrefs"
+                                    class="input-select">
+                            </div>
+                            <div class="form-group">
+                                <label>Monthly Cost ($)</label>
+                                <input type="number" id="scenario-tool-cost" placeholder="500" class="input-select">
+                            </div>
+                            <div class="form-group">
+                                <label>Start Month</label>
+                                <select id="scenario-tool-start" class="input-select">
+                                    <!-- Populated by JS -->
+                                </select>
+                            </div>
+
+                            <button class="btn-primary" onclick="addToolScenario()">ADD TOOL</button>
+                        </div>
+
+                        <!-- Add Client Scenario -->
+                        <div class="card">
+                            <h3>ADD NEW CLIENT</h3>
+                            <p>Simulate winning a new client.</p>
+
+                            <div class="form-group">
+                                <label>Client Name</label>
+                                <input type="text" id="scenario-client-name" placeholder="e.g. New Client"
+                                    class="input-select">
+                            </div>
+                            <div class="form-group">
+                                <label>Monthly Revenue ($)</label>
+                                <input type="number" id="scenario-client-revenue" placeholder="1000"
+                                    class="input-select">
+                            </div>
+                            <div class="form-group">
+                                <label>Start Month</label>
+                                <select id="scenario-client-start" class="input-select">
+                                    <!-- Populated by JS -->
+                                </select>
+                            </div>
+
+                            <button class="btn-primary" onclick="addClientScenario()">ADD CLIENT</button>
+                        </div>
+                    </div>
+
+                    <!-- Active Scenarios List -->
+                    <div class="card full-width-card" style="margin-top: 24px;">
+                        <h3>ACTIVE SCENARIOS</h3>
+                        <div id="scenario-list" class="scenario-list">
+                            <p class="text-muted">No scenarios active.</p>
+                        </div>
+                        <button class="btn-secondary" onclick="resetScenarios()" style="margin-top:1rem;">RESET
+                            ALL</button>
+                    </div>
+                </section>
+
+                <!-- Settings Section -->
+                <section id="settings-section" class="content-section">
+                    <div class="section-header">
+                        <h2>System Settings</h2>
+                        <p class="subtitle">Manage configuration tabs</p>
+                    </div>
+
+                    <div class="card-grid">
+                        <div class="card">
+                            <h3>Setup Tab</h3>
+                            <p>Ensure the "Setup" tab exists and has the latest structure.</p>
+                            <button class="btn-secondary" onclick="runEnsureSetup()">Update Setup Tab</button>
+                            <div id="setup-status" class="status-message"></div>
+                        </div>
+                    </div>
+                </section>
+
+            </main>
+        </div>
+    </div>
+
+    <?!= include('javascript'); ?>
+</body>
+
+</html>

@@ -1,0 +1,279 @@
+<script>
+    // NAVIGATION
+    function showSection(sectionId) {
+        // Hide all sections
+        document.querySelectorAll('.content-section').forEach(el => el.style.display = 'none');
+
+        // Show selected
+        document.getElementById(sectionId + '-section').style.display = 'block';
+
+        // Update nav active state
+        document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+        // Simple logic to find the nav item (could be improved with IDs)
+        const navItems = document.querySelectorAll('.nav-item');
+        if (sectionId === 'fair-usage') navItems[0].classList.add('active');
+        if (sectionId === 'tech-fee') navItems[1].classList.add('active');
+        if (sectionId === 'cashflow') {
+            navItems[2].classList.add('active');
+            loadCashflowData(); // Load data when tab is opened
+        }
+        if (sectionId === 'settings') navItems[3].classList.add('active');
+    }
+
+    // ACTIONS
+    function runFairUsage() {
+        const year = document.getElementById('fu-year').value;
+        const statusEl = document.getElementById('fu-status');
+
+        statusEl.textContent = 'Building allocation table...';
+        statusEl.className = 'status-message status-loading';
+
+        google.script.run
+            .withSuccessHandler(function (res) {
+                statusEl.textContent = 'Success! ' + res;
+                statusEl.className = 'status-message status-success';
+            })
+            .withFailureHandler(function (err) {
+                statusEl.textContent = 'Error: ' + err.message;
+                statusEl.className = 'status-message status-error';
+            })
+            .Build_FairUsage_ForYear_Web(parseInt(year));
+    }
+
+    function runTechFee() {
+        const year = document.getElementById('tf-year').value;
+        const statusEl = document.getElementById('tf-status');
+
+        statusEl.textContent = 'Running comparison...';
+        statusEl.className = 'status-message status-loading';
+
+        google.script.run
+            .withSuccessHandler(function (res) {
+                statusEl.textContent = 'Success! ' + res;
+                statusEl.className = 'status-message status-success';
+            })
+            .withFailureHandler(function (err) {
+                statusEl.textContent = 'Error: ' + err.message;
+                statusEl.className = 'status-message status-error';
+            })
+            .Build_Tech_Fee_Join_Web(parseInt(year));
+    }
+
+    function runUpdateSetup() {
+        const statusDiv = document.getElementById('setup-status');
+        statusDiv.textContent = "Updating Setup tab...";
+        statusDiv.className = "status-msg";
+
+        google.script.run
+            .withSuccessHandler(function (msg) {
+                statusDiv.textContent = "Success! " + msg;
+                statusDiv.className = "status-msg success";
+            })
+            .withFailureHandler(function (err) {
+                statusDiv.textContent = "Error: " + err.message;
+                statusDiv.className = "status-msg error";
+            })
+            .EnsureSetupTab_Web();
+    }
+
+    // --- CASHFLOW DASHBOARD LOGIC ---
+
+    let chartInstance = null;
+    let baseData = null; // Stores the data from server
+    let scenarios = []; // Stores user added scenarios
+
+    function loadCashflowData() {
+        if (baseData) return; // Already loaded
+
+        google.script.run
+            .withSuccessHandler(function (data) {
+                baseData = data;
+                populateMonthSelects(data.months);
+                updateChart();
+            })
+            .withFailureHandler(function (err) {
+                alert("Failed to load cashflow data: " + err.message);
+            })
+            .getCashflowData_Web();
+    }
+
+    function populateMonthSelects(months) {
+        const selects = [document.getElementById('scenario-tool-start'), document.getElementById('scenario-client-start')];
+        selects.forEach(sel => {
+            sel.innerHTML = '';
+            months.forEach((m, idx) => {
+                const opt = document.createElement('option');
+                opt.value = idx;
+                opt.text = m;
+                sel.appendChild(opt);
+            });
+        });
+    }
+
+    function addToolScenario() {
+        const name = document.getElementById('scenario-tool-name').value;
+        const cost = parseFloat(document.getElementById('scenario-tool-cost').value);
+        const startIdx = parseInt(document.getElementById('scenario-tool-start').value);
+
+        if (!name || isNaN(cost)) {
+            alert("Please enter valid tool details.");
+            return;
+        }
+
+        scenarios.push({ type: 'cost', name, value: cost, startIdx });
+        renderScenarioList();
+        updateChart();
+
+        // Clear inputs
+        document.getElementById('scenario-tool-name').value = '';
+        document.getElementById('scenario-tool-cost').value = '';
+    }
+
+    function addClientScenario() {
+        const name = document.getElementById('scenario-client-name').value;
+        const revenue = parseFloat(document.getElementById('scenario-client-revenue').value);
+        const startIdx = parseInt(document.getElementById('scenario-client-start').value);
+
+        if (!name || isNaN(revenue)) {
+            alert("Please enter valid client details.");
+            return;
+        }
+
+        scenarios.push({ type: 'revenue', name, value: revenue, startIdx });
+        renderScenarioList();
+        updateChart();
+
+        // Clear inputs
+        document.getElementById('scenario-client-name').value = '';
+        document.getElementById('scenario-client-revenue').value = '';
+    }
+
+    function resetScenarios() {
+        scenarios = [];
+        renderScenarioList();
+        updateChart();
+    }
+
+    function renderScenarioList() {
+        const container = document.getElementById('scenario-list');
+        if (scenarios.length === 0) {
+            container.innerHTML = '<p class="text-muted">No scenarios active.</p>';
+            return;
+        }
+
+        let html = '';
+        scenarios.forEach((s, idx) => {
+            const sign = s.type === 'cost' ? '-' : '+';
+            const colorClass = s.type;
+            html += `
+                    <div class="scenario-item ${colorClass}">
+                        <span><strong>${s.name}</strong> (Starts ${baseData.months[s.startIdx]})</span>
+                        <span>${sign}$${s.value}/mo</span>
+                    </div>
+                `;
+        });
+        container.innerHTML = html;
+    }
+
+    function updateChart() {
+        if (!baseData) return;
+
+        const ctx = document.getElementById('cashflowChart').getContext('2d');
+
+        // 1. Calculate Scenario Impact
+        const months = baseData.months;
+        const totalRevenue = [...baseData.revenue];
+        const totalCosts = [...baseData.costs];
+
+        scenarios.forEach(s => {
+            for (let i = s.startIdx; i < months.length; i++) {
+                if (s.type === 'revenue') totalRevenue[i] += s.value;
+                if (s.type === 'cost') totalCosts[i] += s.value;
+            }
+        });
+
+        // 2. Calculate Cumulative Cash (Surplus)
+        const cumulativeCash = [];
+        let runningTotal = 0;
+        for (let i = 0; i < months.length; i++) {
+            const monthlySurplus = totalRevenue[i] - totalCosts[i];
+            runningTotal += monthlySurplus;
+            cumulativeCash.push(runningTotal);
+        }
+
+        // 3. Render Chart
+        if (chartInstance) chartInstance.destroy();
+
+        chartInstance = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: months,
+                datasets: [
+                    {
+                        label: 'Cumulative Cash (Line)',
+                        data: cumulativeCash,
+                        type: 'line',
+                        borderColor: '#FFB71B', // Jellyfish Gold
+                        backgroundColor: '#FFB71B',
+                        borderWidth: 3,
+                        yAxisID: 'y1',
+                        order: 0
+                    },
+                    {
+                        label: 'Monthly Revenue',
+                        data: totalRevenue,
+                        backgroundColor: '#00cc66',
+                        order: 1
+                    },
+                    {
+                        label: 'Monthly Cost',
+                        data: totalCosts,
+                        backgroundColor: '#ff4d4d',
+                        order: 2
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Cashflow Forecast (Hybrid View)',
+                        color: '#ffffff',
+                        font: { size: 16, family: 'Big Shoulders Display' }
+                    },
+                    legend: {
+                        labels: { color: '#cccccc' }
+                    }
+                },
+                scales: {
+                    x: {
+                        ticks: { color: '#cccccc' },
+                        grid: { color: '#333333' }
+                    },
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        ticks: { color: '#cccccc' },
+                        grid: { color: '#333333' },
+                        title: { display: true, text: 'Monthly Amount ($)', color: '#cccccc' }
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        grid: { drawOnChartArea: false },
+                        ticks: { color: '#FFB71B' },
+                        title: { display: true, text: 'Cumulative Cash ($)', color: '#FFB71B' }
+                    }
+                }
+            }
+        });
+    }
+</script>
