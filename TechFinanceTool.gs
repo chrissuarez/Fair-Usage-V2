@@ -10,6 +10,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Step 1: Generate Data Engine', 'generateTechRunRate')
     .addItem('Step 2: Build Dashboard', 'buildDashboard')
+    .addItem('Generate Tool Cost Timeline', 'buildToolCostTimeline')
     .addSeparator()
     .addItem('Create Tool Transactions Tab', 'ensureToolTransactionsTab')
     .addToUi();
@@ -263,13 +264,84 @@ function ensureToolTransactionsTab() {
   sheet.getRange("F2:F").setNumberFormat("MMM yyyy");
 
   // Seed helper formulas on a fresh sheet so month/year auto-populate from Date
-  if (isNew && sheet.getLastRow() < 2) {
-    sheet.getRange("F2").setFormula('=IF(A2="","",TEXT(A2,"mmm-yyyy"))');
-    sheet.getRange("G2").setFormula('=IF(A2="","",YEAR(A2))');
+    if (isNew && sheet.getLastRow() < 2) {
+      sheet.getRange("F2").setFormula('=IF(A2="","",TEXT(A2,"mmm-yyyy"))');
+      sheet.getRange("G2").setFormula('=IF(A2="","",YEAR(A2))');
+    }
+
+    headers.forEach((_, idx) => sheet.autoResizeColumn(idx + 1));
+    SpreadsheetApp.getUi().alert(`"${SHEET_NAME}" tab is ready. Add transactions starting in row 2.`);
+}
+
+// Build a month-by-month view of tool costs, similar to the revenue forecast sheet.
+function buildToolCostTimeline() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const SOURCE_SHEET_NAME = "Tool Transactions";
+  const TARGET_SHEET_NAME = "Tool Cost Forecast 2025-26";
+  const START_DATE = new Date("2025-01-01");
+  const END_DATE = new Date("2026-12-31");
+
+  const source = ss.getSheetByName(SOURCE_SHEET_NAME);
+  if (!source) throw new Error(`Source sheet "${SOURCE_SHEET_NAME}" not found. Use "Create Tool Transactions Tab" first.`);
+
+  const data = source.getDataRange().getValues();
+  if (data.length < 2) throw new Error("No tool transaction data found.");
+
+  const monthHeaders = getMonthHeaders(START_DATE, END_DATE);
+  const monthIndex = new Map();
+  monthHeaders.dates.forEach((d, i) => {
+    monthIndex.set(`${d.getFullYear()}-${d.getMonth()}`, i);
+  });
+
+  const rowsByVendor = new Map(); // key: vendor string
+
+  for (let i = 1; i < data.length; i++) { // skip header
+    const row = data[i];
+    const dt = new Date(row[0]);
+    const vendor = (row[1] || "").toString().trim() || "Unknown Vendor";
+    const category = (row[2] || "").toString().trim();
+    const amount = parseCurrency(row[3]);
+
+    if (!amount || amount <= 0) continue;
+    if (isNaN(dt) || dt < START_DATE || dt > END_DATE) continue;
+
+    const key = `${dt.getFullYear()}-${dt.getMonth()}`;
+    const idx = monthIndex.get(key);
+    if (idx == null) continue;
+
+    if (!rowsByVendor.has(vendor)) {
+      rowsByVendor.set(vendor, { vendor, category: category || "", total: 0, months: new Array(monthHeaders.labels.length).fill(0) });
+    }
+    const entry = rowsByVendor.get(vendor);
+    entry.total += amount;
+    entry.months[idx] += amount;
+    if (!entry.category && category) entry.category = category; // keep first non-empty
   }
 
-  headers.forEach((_, idx) => sheet.autoResizeColumn(idx + 1));
-  SpreadsheetApp.getUi().alert(`"${SHEET_NAME}" tab is ready. Add transactions starting in row 2.`);
+  const outputRows = Array.from(rowsByVendor.values())
+    .sort((a, b) => a.vendor.localeCompare(b.vendor))
+    .map(entry => [entry.vendor, entry.category, entry.total, ...entry.months]);
+
+  const headers = ["Vendor", "Category", "Total Cost", ...monthHeaders.labels];
+
+  let target = ss.getSheetByName(TARGET_SHEET_NAME);
+  if (!target) target = ss.insertSheet(TARGET_SHEET_NAME);
+  else target.clear();
+
+  target.getRange(1, 1, 1, headers.length)
+    .setValues([headers])
+    .setFontWeight("bold")
+    .setBackground("#EFEFEF");
+
+  if (outputRows.length) {
+    target.getRange(2, 1, outputRows.length, headers.length).setValues(outputRows);
+    target.getRange(2, 3, outputRows.length, headers.length - 2).setNumberFormat("$#,##0.00");
+  }
+
+  target.setFrozenRows(1);
+  target.setFrozenColumns(2);
+  headers.forEach((_, idx) => target.autoResizeColumn(idx + 1));
+  ss.setActiveSheet(target);
 }
 
 // ==========================================
