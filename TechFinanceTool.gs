@@ -126,6 +126,8 @@ function buildDashboard() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const DASHBOARD_NAME = "Upgrade Predictor";
   const DATA_SHEET_NAME = "Tech Cashflow Forecast 2025-26"; 
+  const START_PROJECTION_DATE = new Date("2025-01-01");
+  const END_PROJECTION_DATE = new Date("2026-12-31");
   
   // Verify Data Sheet Exists
   if (!ss.getSheetByName(DATA_SHEET_NAME)) {
@@ -190,7 +192,9 @@ function buildDashboard() {
   // Generate Timelines
   const colLetters = generateColumnLetters(7, 24); // G to AD (Matches Step 1 Output)
   let formulaData = [[], [], [], [], [], []]; 
-  let currentDate = new Date("2025-01-01");
+  let currentDate = new Date(START_PROJECTION_DATE);
+  const toolCosts = getToolCostsByMonth(START_PROJECTION_DATE, END_PROJECTION_DATE);
+  const hasToolCosts = Array.isArray(toolCosts) && toolCosts.length === colLetters.length;
   
   colLetters.forEach((col, index) => {
     let year = currentDate.getFullYear();
@@ -199,7 +203,8 @@ function buildDashboard() {
     let myCol = columnToLetter(index + 2); // Start at B
     
     formulaData[0].push(new Date(currentDate)); // Store date, format after set
-    formulaData[1].push(`=${burnCell}`); // Burn
+    const monthCost = hasToolCosts ? toolCosts[index] : `=${burnCell}`;
+    formulaData[1].push(monthCost); // Burn (actual transactions if available)
     formulaData[2].push(`=SUM('${DATA_SHEET_NAME}'!${col}2:${col})`); // Revenue (skip header row)
     formulaData[3].push(`=SUMPRODUCT(($J$3:$J$5<=${myCol}${startRow})*($J$3:$J$5<>"")*(($K$3:$K$5="")+($K$3:$K$5>=${myCol}${startRow}))*$I$3:$I$5)`); // Pipeline active window
     formulaData[4].push(`=(${myCol}${startRow+2}+${myCol}${startRow+3})-${myCol}${startRow+1}`); // Surplus
@@ -311,4 +316,39 @@ function columnToLetter(column) {
     column = (column - temp - 1) / 26;
   }
   return letter;
+}
+
+// Sum monthly tool costs from the "Tool Transactions" sheet for the projection window.
+// Assumes amounts are entered as positive numbers; they are treated as costs.
+function getToolCostsByMonth(startDate, endDate) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Tool Transactions");
+  if (!sheet) return null;
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+
+  // Read Date (col A) and Amount (col D)
+  const rows = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
+  const byMonth = {};
+
+  rows.forEach(r => {
+    const dt = r[0];
+    const amt = Number(r[3]);
+    if (!(dt instanceof Date) || isNaN(dt)) return;
+    if (!isFinite(amt)) return;
+
+    const key = `${dt.getFullYear()}-${dt.getMonth()}`; // month key
+    byMonth[key] = (byMonth[key] || 0) + amt; // positive amounts = costs
+  });
+
+  // Expand to full timeline
+  let out = [];
+  let cursor = new Date(startDate);
+  while (cursor <= endDate) {
+    const key = `${cursor.getFullYear()}-${cursor.getMonth()}`;
+    out.push(byMonth[key] || 0);
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return out;
 }
