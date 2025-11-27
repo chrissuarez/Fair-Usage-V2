@@ -757,6 +757,214 @@ function EnsureSetupTab_Web() {
   return "Setup tab updated.";
 }
 
+function EnsureExpensesTab_Web() {
+  EnsureExpensesTab_();
+  return "Tool Expenses tab created/verified.";
+}
+
+function generateTechRunRate_Web() {
+  generateTechRunRate({ suppressUi: true });
+  return "Forecast regenerated successfully.";
+}
+
+function getCashflowData_Web() {
+  return getCashflowData();
+}
+
+/*************************
+ * HELPERS
+ *************************/
+function inferTier_(revenue, tiers) {
+  for (const t of tiers) {
+    if (revenue >= t.min && revenue <= t.max) return t;
+  }
+  return tiers[tiers.length - 1] || { name: 'Tier D', base: 100, ceiling: 250 };
+}
+function cadenceFor_(tierName, paying, map) {
+  const t = map[tierName] || map['Tier D'] || { nonpaying: 'Quarterly', paying: 'Quarterly' };
+  return paying ? t.paying : t.nonpaying;
+}
+function readTable_(values, header, rowHandler) {
+  const headers = Array.isArray(header) ? header : [header];
+  let start = -1;
+  for (let i = 0; i < values.length; i++) {
+    if (headers.indexOf(values[i][0]) !== -1) { start = i + 1; break; }
+  }
+  if (start < 0) return;
+  for (let r = start; r < values.length; r++) {
+    const row = values[r];
+    if (!row[0]) break; // stop at blank separator row
+    rowHandler(row);
+  }
+}
+function getLastRow_(sheet, col, startRow) {
+  const values = sheet.getRange(startRow, col, sheet.getMaxRows() - startRow + 1, 1).getValues();
+  for (let i = values.length - 1; i >= 0; i--) {
+    if (String(values[i][0]).trim() !== '') return startRow + i;
+  }
+  return startRow - 1;
+}
+
+function renderAccountConfigSheet_(sheet) {
+  const rows = [
+    ['Account', 'Site Size', 'Own Crawler?', 'Active?', 'OneSearch Account?', 'OneSearch Extra Keywords', 'Notes'],
+    ['Walgreens Boots Alliance', 'Large', 'Yes', 'Yes', 'No', 0, ''],
+    ['Swarovski AG', 'Large', 'No', 'Yes', 'Yes', 10000, 'Own crawler + OneSearch'],
+    ['Shawbrook Bank', 'Small', 'No', 'No', 'No', 0, '']
+  ];
+  sheet.clear();
+  sheet.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
+  sheet.setFrozenRows(1);
+  for (let c = 1; c <= rows[0].length; c++) sheet.autoResizeColumn(c);
+}
+
+function defaultSetupRenderState_() {
+  return {
+    keyValues: {
+      ACCURANKER_CAPACITY: 100000,
+      OWN_CRAWLER_ACCU_MULT: 1.25,
+      OWN_CRAWLER_SKIP_ONCRAWL: 'Yes'
+    },
+    tableRows: {
+      tiers: defaultTierRows_(),
+      accuCaps: defaultAccuRankerCapsRows_(),
+      semrush: defaultSemrushRows_(),
+      onCrawl: defaultOncrawlRows_(),
+      cadence: defaultCadenceRows_(),
+      siteSizeMultipliers: defaultSiteSizeRows_(),
+      accountSizes: defaultAccountSizeRows_(),
+      crawlerStatus: defaultCrawlerRows_(),
+      allocationGuidance: defaultAllocationRows_()
+    }
+  };
+}
+
+function defaultTierRows_() {
+  return [
+    ['Tier A', 500000, '', '800 / 2000'],
+    ['Tier B', 200000, 499999, '500 / 1200'],
+    ['Tier C', 50000, 199999, '250 / 600'],
+    ['Tier D', 0, 49999, '100 / 250']
+  ];
+}
+
+function defaultAccuRankerCapsRows_() {
+  return [
+    ['Tier A', 800, 3000, ''],
+    ['Tier B', 500, 1500, ''],
+    ['Tier C', 250, 800, ''],
+    ['Tier D', 100, 400, '']
+  ];
+}
+
+function defaultSemrushRows_() {
+  return [
+    ['Tier A', 200, 400, ''],
+    ['Tier B', 150, 300, ''],
+    ['Tier C', 100, 200, ''],
+    ['Tier D', 50, 100, '']
+  ];
+}
+
+function defaultOncrawlRows_() {
+  return [
+    ['Tier A', 25000, 40000, ''],
+    ['Tier B', 10000, 18000, ''],
+    ['Tier C', 5000, 8000, ''],
+    ['Tier D', 2500, 4000, '']
+  ];
+}
+
+function defaultCadenceRows_() {
+  return [
+    ['Tier A', 'Monthly', 'Weekly/Fortnightly', ''],
+    ['Tier B', 'Bi-monthly or Quarterly', 'Monthly', ''],
+    ['Tier C', 'Quarterly', 'Quarterly', ''],
+    ['Tier D', 'One-off / Quarterly by request', 'One-off / Quarterly by request', '']
+  ];
+}
+
+function defaultSiteSizeRows_() {
+  return [
+    ['Default', 1.0, '< 5k pages or standard demand', 'Fallback when no size is specified'],
+    ['Small', 0.8, '< 5k indexed pages', 'Lower crawl demand'],
+    ['Medium', 1.0, '5k – 30k indexed pages', 'Baseline allocation'],
+    ['Large', 1.3, '30k+ indexed pages or ecommerce', 'Boosted allocation']
+  ];
+}
+
+function defaultAccountSizeRows_() {
+  return [
+    ['Example Account A', 'Large', '', 'Replace with your account + size'],
+    ['Example Account B', 'Medium', '', ''],
+    ['Example Account C', 'Small', '', '']
+  ];
+}
+
+function defaultCrawlerRows_() {
+  return [
+    ['Example Account D', 'Yes', 'Skips OnCrawl and gains Accu bonus', '']
+  ];
+}
+
+function defaultAllocationRows_() {
+  return [
+    ['How to use', 'Accu = Fixed Tier Cap (Paying vs Non-Paying).', 'Own Crawler? = Yes -> Multiplies Accu allocation by 1.25x.', 'Semrush = Strict Tier Cap (Paying vs Non-Paying).'],
+    ['Example (Tier B • Paying)', 'Accu = 1500 keywords (Fixed).', 'Semrush = 300 keywords (Fixed).', 'OnCrawl = 18k URLs (Starter Cap).']
+  ];
+}
+
+function padRow4_(row) {
+  return [row[0] ?? '', row[1] ?? '', row[2] ?? '', row[3] ?? ''];
+}
+
+function captureTable_(values, header) {
+  const headers = Array.isArray(header) ? header : [header];
+  for (let i = 0; i < values.length; i++) {
+    if (headers.indexOf(values[i][0]) !== -1) {
+      const rows = [];
+      for (let r = i + 1; r < values.length; r++) {
+        const row = values[r];
+        if (!row[0]) break;
+        rows.push(padRow4_(row));
+      }
+      return rows;
+    }
+  }
+  return [];
+}
+
+function parseYesNo_(value) {
+  if (value === undefined || value === null) return false;
+  return /^(yes|y|true|1)$/i.test(String(value).trim());
+}
+
+/*************************
+ * WEB APP WRAPPERS
+ *************************/
+function Build_FairUsage_ForYear_Web(year) {
+  return Build_FairUsage_ForYear(year);
+}
+
+function Build_Tech_Fee_Join_Web(year) {
+  return Build_Tech_Fee_Join(year);
+}
+
+function EnsureSetupTab_Web() {
+  EnsureSetupTab_();
+  return "Setup tab updated.";
+}
+
+function EnsureExpensesTab_Web() {
+  EnsureExpensesTab_();
+  return "Tool Expenses tab created/verified.";
+}
+
+function generateTechRunRate_Web() {
+  generateTechRunRate({ suppressUi: true });
+  return "Forecast regenerated successfully.";
+}
+
 function getCashflowData_Web() {
   return getCashflowData();
 }
@@ -798,33 +1006,46 @@ function getOrCreateSheet_(ss, name) { let sh = ss.getSheetByName(name); if (!sh
 function safeStr_(v) { return (v == null ? '' : String(v)).trim(); }
 function toNumber_(v) { const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/,/g, '')); return isFinite(n) ? n : 0; }
 
+function EnsureExpensesTab_() {
+  const ss = SpreadsheetApp.getActive();
+  const name = "Tool Expenses";
+  let sh = ss.getSheetByName(name);
+  if (!sh) {
+    sh = ss.insertSheet(name);
+    sh.getRange("A1:E1").setValues([["Date", "Tool Name", "Amount", "Category", "Notes"]]).setFontWeight("bold");
+    sh.setFrozenRows(1);
+    // Add some sample data if empty
+    sh.getRange("A2:E2").setValues([[new Date(), "Example Tool", 100, "Software", "Delete this row"]]);
+  }
+}
+
 /*************************
  * 4) CASHFLOW DASHBOARD DATA
  *************************/
 function getCashflowData() {
   const ss = SpreadsheetApp.getActive();
   const SHEET_NAME = "Tech Cashflow Forecast 2025-26";
+  const TOOL_TX_SHEET = "Tool Transactions";
+  const SEO_SHEET = "SEO Client Revenue";
   const sh = ss.getSheetByName(SHEET_NAME);
-
+  
   if (!sh) {
-    throw new Error(`Sheet "${SHEET_NAME}" not found. Please run "Generate Tech Run Rate" from the menu first.`);
+    throw new Error(`Sheet "${SHEET_NAME}" not found. Please run "Generate Tech Run Rate" first.`);
   }
 
   const data = sh.getDataRange().getValues();
   const headers = data[0];
-
+  
   // Find month columns (starting from col 6, index 6)
-  // Headers: Client, Market, Start, End, Total, Monthly, Jan-25, Feb-25...
   const monthStartIndex = 6;
   const months = headers.slice(monthStartIndex).map(d => {
-    // Format date as "MMM-yy"
     return Utilities.formatDate(new Date(d), Session.getScriptTimeZone(), "MMM-yy");
   });
+  const monthDates = headers.slice(monthStartIndex).map(d => new Date(d));
+  const monthKeys = monthDates.map(d => Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM"));
 
   // Calculate Total Revenue per Month
   const revenue = new Array(months.length).fill(0);
-
-  // Skip header
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     for (let m = 0; m < months.length; m++) {
@@ -835,21 +1056,92 @@ function getCashflowData() {
     }
   }
 
-  // Default Costs (Burn Rate) - Hardcoded for now based on DashboardBuilder
-  // In a real scenario, this could be read from a config sheet
-  const defaultCosts = new Array(months.length).fill(13144); // Base stack cost
+  // Calculate Costs from "Tool Expenses"
+  const costs = new Array(months.length).fill(0);
+  const monthTransactions = months.map(() => []);
+  const expSh = ss.getSheetByName(TOOL_TX_SHEET);
+  if (expSh) {
+    const lastRow = expSh.getLastRow();
+    if (lastRow >= 2) {
+      // Date (col A) and Amount (col D) — positive amounts are treated as costs
+      const expData = expSh.getRange(2, 1, lastRow - 1, 5).getValues(); // A:E to grab notes too
+      expData.forEach(row => {
+        const date = row[0];
+        const vendor = safeStr_(row[1]);
+        const category = safeStr_(row[2]);
+        const amount = toNumber_(row[3]);
+        const notes = safeStr_(row[4]);
+        if (!(date instanceof Date) || isNaN(date)) return;
+        if (!isFinite(amount) || amount <= 0) return;
 
-  // Add upgrade cost in 2026 (assuming months start Jan 2025)
-  // 2026 starts at index 12
-  for (let m = 12; m < months.length; m++) {
-    if (m < defaultCosts.length) {
-      defaultCosts[m] += 3000; // Add upgrade cost
+        const mIdx = monthDates.findIndex(md =>
+          md.getMonth() === date.getMonth() && md.getFullYear() === date.getFullYear()
+        );
+        if (mIdx >= 0) {
+          costs[mIdx] += amount;
+          monthTransactions[mIdx].push({
+            date: Utilities.formatDate(date, Session.getScriptTimeZone(), "yyyy-MM-dd"),
+            vendor: vendor || "Unknown Vendor",
+            category: category || "Uncategorized",
+            amount: amount,
+            notes: notes || ""
+          });
+        }
+      });
+    }
+  }
+
+  // Load SEO revenue (yearly -> monthly) for client breakdown
+  const SEO_YEAR_COLS = { 2024: 3, 2025: 4, 2026: 5 };
+  const seoSh = ss.getSheetByName(SEO_SHEET);
+  const seoMonthlyByAccount = new Map();
+  if (seoSh) {
+    const seoLast = getLastRow_(seoSh, 1, 2);
+    if (seoLast >= 2) {
+      const seoData = seoSh.getRange(2, 1, seoLast - 1 + 1, 5).getValues(); // up to col 5 to cover 2026
+      seoData.forEach(row => {
+        const acc = safeStr_(row[0]);
+        if (!acc) return;
+        const accKey = acc.toLowerCase();
+        const yearMap = {};
+        [2024, 2025, 2026].forEach(yr => {
+          const colIdx = SEO_YEAR_COLS[yr] - 1;
+          const annual = toNumber_(row[colIdx]);
+          if (annual > 0) yearMap[yr] = annual / 12;
+        });
+        seoMonthlyByAccount.set(accKey, yearMap);
+      });
+    }
+  }
+
+  // Client-level monthly contributions from the forecast sheet
+  const clientRevenue = months.map(() => []);
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const client = safeStr_(row[0]);
+    const market = safeStr_(row[1]);
+    const accKey = client.toLowerCase();
+    for (let m = 0; m < months.length; m++) {
+      const val = toNumber_(row[monthStartIndex + m]);
+      if (!val) continue;
+      const yr = monthDates[m].getFullYear();
+      const seoMap = seoMonthlyByAccount.get(accKey) || {};
+      const seoMonthly = seoMap[yr] || 0;
+      clientRevenue[m].push({
+        client: client,
+        market: market,
+        toolRevenue: val,
+        seoRevenue: seoMonthly
+      });
     }
   }
 
   return {
     months: months,
+    monthKeys: monthKeys,
     revenue: revenue,
-    costs: defaultCosts
+    costs: costs,
+    monthTransactions: monthTransactions,
+    clientRevenue: clientRevenue
   };
 }

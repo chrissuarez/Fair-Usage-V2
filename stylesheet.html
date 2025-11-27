@@ -239,6 +239,47 @@
             background-color: rgba(255, 183, 27, 0.1);
         }
 
+        /* TABLES */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            border: 1px solid #3a3a3a;
+        }
+
+        .data-table th,
+        .data-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #3a3a3a;
+            color: var(--jf-white);
+            text-align: left;
+        }
+
+        .data-table th {
+            font-weight: 700;
+            color: var(--jf-white);
+            background-color: rgba(255, 255, 255, 0.04);
+        }
+
+        .data-table td.currency,
+        .data-table th.currency {
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .detail-heading {
+            margin-top: 28px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: baseline;
+            gap: 12px;
+        }
+
+        .detail-total {
+            color: var(--text-grey);
+            font-size: 14px;
+            font-weight: 600;
+        }
+
         /* STATUS MESSAGES */
         .status-message {
             margin-top: 16px;

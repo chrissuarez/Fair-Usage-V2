@@ -3,9 +3,10 @@
  * Analyzes client contracts to generate a month-by-month tech revenue forecast.
  */
 
-function generateTechRunRate() {
+function generateTechRunRate(options) {
+  const opts = options || {};
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const ui = SpreadsheetApp.getUi();
+  const ui = opts.suppressUi ? null : SpreadsheetApp.getUi();
   
   // 1. CONFIGURATION: Map these to your actual sheet names
   const SOURCE_SHEET_NAME = "SEO Revenue from Closed Won Opps - Tech Fees Per Client";
@@ -21,7 +22,7 @@ function generateTechRunRate() {
   // Try to locate or mirror the source tab from the external workbook
   const sourceSheet =
     ss.getSheetByName(SOURCE_SHEET_NAME) ||
-    syncExternalSheet_(ss, ui, SOURCE_SHEET_NAME, SOURCE_SPREADSHEET_ID, SOURCE_TAB_NAME);
+    syncExternalSheet_(ss, ui, SOURCE_SHEET_NAME, SOURCE_SPREADSHEET_ID, SOURCE_TAB_NAME, opts);
   
   // Get all data (assuming headers are in row 1)
   const data = sourceSheet.getDataRange().getValues();
@@ -145,13 +146,14 @@ function getSheetOrPrompt_(ss, ui, preferredName, promptMessage) {
 }
 
 // Pulls data from another spreadsheet tab into a local sheet (overwrite/replace).
-function syncExternalSheet_(ss, ui, localName, externalSpreadsheetId, externalTabName) {
+function syncExternalSheet_(ss, ui, localName, externalSpreadsheetId, externalTabName, options) {
+  const opts = options || {};
   try {
     const extSs = SpreadsheetApp.openById(externalSpreadsheetId);
     const extSheet = extSs.getSheetByName(externalTabName);
     if (!extSheet) {
-      ui.alert(`External tab "${externalTabName}" not found in the source workbook.`);
-      throw new Error('External tab missing');
+      if (ui) ui.alert(`External tab "${externalTabName}" not found in the source workbook.`);
+      throw new Error(`External tab "${externalTabName}" missing`);
     }
     const data = extSheet.getDataRange().getValues();
     if (!data.length) throw new Error('External tab is empty');
@@ -162,7 +164,7 @@ function syncExternalSheet_(ss, ui, localName, externalSpreadsheetId, externalTa
     local.getRange(1, 1, data.length, data[0].length).setValues(data);
     return local;
   } catch (err) {
-    ui.alert('Unable to import source tab. Please ensure you have access to the source spreadsheet and the tab name is correct.');
+    if (ui) ui.alert('Unable to import source tab. Please ensure you have access to the source spreadsheet and the tab name is correct.');
     throw err;
   }
 }

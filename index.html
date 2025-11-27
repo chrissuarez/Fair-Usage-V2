@@ -139,6 +139,67 @@
                             <canvas id="cashflowChart"></canvas>
                         </div>
                     </div>
+                    <div class="card full-width-card" style="margin-bottom: 16px;">
+                        <div class="section-header" style="margin-bottom:12px;">
+                            <h3>Tool Revenue vs. Burn Rate &amp; Scenario Planning</h3>
+                            <p class="subtitle" style="margin-bottom:8px;">
+                                Tool Revenue: <span id="range-revenue-total">$0.00</span> • Tool Cost: <span id="range-cost-total">$0.00</span>
+                            </p>
+                        </div>
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label for="range-start">Start Month</label>
+                                <input type="month" id="range-start" class="input-select" />
+                            </div>
+                            <div class="form-group">
+                                <label for="range-end">End Month</label>
+                                <input type="month" id="range-end" class="input-select" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Month Detail -->
+                    <div class="card full-width-card" style="margin-bottom: 24px;">
+                        <div class="section-header" style="margin-bottom:12px;">
+                            <h3 id="month-detail-title">Month Detail</h3>
+                            <p class="subtitle" style="margin:0;">Click a bar/line point to view transactions and client revenue.</p>
+                        </div>
+                        <div class="grid-2">
+                            <div>
+                                <h4 class="detail-heading">Tool Transactions <span id="tx-total" class="detail-total"></span></h4>
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Vendor</th>
+                                            <th>Category</th>
+                                            <th class="currency">Amount</th>
+                                            <th>Date</th>
+                                            <th>Notes</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tx-table-body">
+                                        <tr><td colspan="5" class="text-muted">No transactions for this month.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div>
+                                <h4 class="detail-heading">Revenue - SEO <span id="client-seo-total" class="detail-total"></span> &amp; Tool <span id="client-tool-total" class="detail-total"></span></h4>
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Account</th>
+                                            <th>Market</th>
+                                            <th class="currency">Tool Revenue</th>
+                                            <th class="currency">SEO Revenue</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="client-table-body">
+                                        <tr><td colspan="4" class="text-muted">No client revenue for this month.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
 
                     <!-- Scenario Builder -->
                     <div class="grid-2">

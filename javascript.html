@@ -81,6 +81,9 @@
     let chartInstance = null;
     let baseData = null; // Stores the data from server
     let scenarios = []; // Stores user added scenarios
+    let selectedMonthIdx = 0;
+    let rangeStartIdx = 0;
+    let rangeEndIdx = 0;
 
     function loadCashflowData() {
         if (baseData) return; // Already loaded
@@ -88,13 +91,55 @@
         google.script.run
             .withSuccessHandler(function (data) {
                 baseData = data;
+                rangeStartIdx = 0;
+                rangeEndIdx = baseData.months.length - 1;
                 populateMonthSelects(data.months);
+                initRangeInputs();
+                renderMonthDetails(0);
                 updateChart();
             })
             .withFailureHandler(function (err) {
                 alert("Failed to load cashflow data: " + err.message);
             })
             .getCashflowData_Web();
+    }
+
+    function initRangeInputs() {
+        const startInput = document.getElementById('range-start');
+        const endInput = document.getElementById('range-end');
+        if (!baseData || !baseData.monthKeys) return;
+        const minVal = baseData.monthKeys[0];
+        const maxVal = baseData.monthKeys[baseData.monthKeys.length - 1];
+        startInput.min = minVal;
+        startInput.max = maxVal;
+        endInput.min = minVal;
+        endInput.max = maxVal;
+        startInput.value = minVal;
+        endInput.value = maxVal;
+        startInput.addEventListener('change', handleRangeChange);
+        endInput.addEventListener('change', handleRangeChange);
+    }
+
+    function handleRangeChange() {
+        if (!baseData || !baseData.monthKeys) return;
+        const startInput = document.getElementById('range-start');
+        const endInput = document.getElementById('range-end');
+        const startVal = startInput.value;
+        const endVal = endInput.value;
+        const startIdx = baseData.monthKeys.indexOf(startVal);
+        const endIdx = baseData.monthKeys.indexOf(endVal);
+        if (startIdx === -1 || endIdx === -1 || startIdx > endIdx) {
+            // reset to full range if invalid
+            rangeStartIdx = 0;
+            rangeEndIdx = baseData.months.length - 1;
+            startInput.value = baseData.monthKeys[0];
+            endInput.value = baseData.monthKeys[baseData.monthKeys.length - 1];
+        } else {
+            rangeStartIdx = startIdx;
+            rangeEndIdx = endIdx;
+        }
+        renderMonthDetails(rangeStartIdx);
+        updateChart();
     }
 
     function populateMonthSelects(months) {
@@ -185,6 +230,7 @@
         const totalRevenue = [...baseData.revenue];
         const totalCosts = [...baseData.costs];
 
+        // Apply scenarios to full timeline
         scenarios.forEach(s => {
             for (let i = s.startIdx; i < months.length; i++) {
                 if (s.type === 'revenue') totalRevenue[i] += s.value;
@@ -192,14 +238,31 @@
             }
         });
 
-        // 2. Calculate Cumulative Cash (Surplus)
-        const cumulativeCash = [];
+        // Guard range indexes
+        const startIdx = Math.max(0, Math.min(rangeStartIdx, months.length - 1));
+        const endIdx = Math.max(startIdx, Math.min(rangeEndIdx, months.length - 1));
+
+        // Calculate Cumulative Cash with historical offset
         let runningTotal = 0;
-        for (let i = 0; i < months.length; i++) {
-            const monthlySurplus = totalRevenue[i] - totalCosts[i];
-            runningTotal += monthlySurplus;
+        for (let i = 0; i < startIdx; i++) {
+            runningTotal += (totalRevenue[i] - totalCosts[i]);
+        }
+        const cumulativeCash = [];
+        const rangeRevenue = [];
+        const rangeCosts = [];
+        const rangeLabels = [];
+        for (let i = startIdx; i <= endIdx; i++) {
+            rangeRevenue.push(totalRevenue[i]);
+            rangeCosts.push(totalCosts[i]);
+            rangeLabels.push(months[i]);
+            runningTotal += (totalRevenue[i] - totalCosts[i]);
             cumulativeCash.push(runningTotal);
         }
+        // Totals in range
+        const rangeRevenueTotal = rangeRevenue.reduce((sum, v) => sum + (Number(v) || 0), 0);
+        const rangeCostTotal = rangeCosts.reduce((sum, v) => sum + (Number(v) || 0), 0);
+        document.getElementById('range-revenue-total').textContent = formatCurrency(rangeRevenueTotal);
+        document.getElementById('range-cost-total').textContent = formatCurrency(rangeCostTotal);
 
         // 3. Render Chart
         if (chartInstance) chartInstance.destroy();
@@ -207,7 +270,7 @@
         chartInstance = new Chart(ctx, {
             type: 'bar',
             data: {
-                labels: months,
+                labels: rangeLabels,
                 datasets: [
                     {
                         label: 'Cumulative Cash (Line)',
@@ -221,15 +284,27 @@
                     },
                     {
                         label: 'Monthly Revenue',
-                        data: totalRevenue,
+                        data: rangeRevenue,
                         backgroundColor: '#00cc66',
                         order: 1
                     },
                     {
                         label: 'Monthly Cost',
-                        data: totalCosts,
+                        data: rangeCosts,
                         backgroundColor: '#ff4d4d',
                         order: 2
+                    },
+                    {
+                        label: 'Zero (Cumulative)',
+                        data: new Array(rangeLabels.length).fill(0),
+                        type: 'line',
+                        borderColor: '#d85eff',
+                        borderDash: [6, 6],
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        tension: 0,
+                        yAxisID: 'y1',
+                        order: 3
                     }
                 ]
             },
@@ -239,6 +314,13 @@
                 interaction: {
                     mode: 'index',
                     intersect: false,
+                },
+                onClick: (evt, activeEls) => {
+                    if (!activeEls || !activeEls.length) return;
+                    const firstPoint = activeEls[0];
+                    if (firstPoint.index != null) {
+                        renderMonthDetails(startIdx + firstPoint.index);
+                    }
                 },
                 plugins: {
                     title: {
@@ -275,5 +357,90 @@
                 }
             }
         });
+    }
+
+    function renderMonthDetails(idx) {
+        if (!baseData) return;
+        selectedMonthIdx = idx;
+        const monthLabel = baseData.months[idx] || 'Month';
+        document.getElementById('month-detail-title').textContent = `Month Detail – ${monthLabel}`;
+
+        // Transactions
+        const txBody = document.getElementById('tx-table-body');
+        const txTotalEl = document.getElementById('tx-total');
+        const tx = (baseData.monthTransactions && baseData.monthTransactions[idx]) || [];
+        if (!tx.length) {
+            txBody.innerHTML = '<tr><td colspan="5" class="text-muted">No transactions for this month.</td></tr>';
+            txTotalEl.textContent = '(Total: $0.00)';
+        } else {
+            const txSorted = [...tx].sort((a, b) => (b.amount || 0) - (a.amount || 0));
+            const totalTx = txSorted.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+            txTotalEl.textContent = `(Total: ${formatCurrency(totalTx)})`;
+            txBody.innerHTML = txSorted.map(t => `
+                <tr>
+                    <td>${escapeHtml(t.vendor || '')}</td>
+                    <td>${escapeHtml(t.category || '')}</td>
+                    <td class="currency">${formatCurrency(t.amount)}</td>
+                    <td>${escapeHtml(t.date || '')}</td>
+                    <td>${escapeHtml(t.notes || '')}</td>
+                </tr>
+            `).join('');
+        }
+
+        // Client revenue
+        const clientBody = document.getElementById('client-table-body');
+        const clientSeoTotalEl = document.getElementById('client-seo-total');
+        const clientToolTotalEl = document.getElementById('client-tool-total');
+        const clientsRaw = (baseData.clientRevenue && baseData.clientRevenue[idx]) || [];
+        if (!clientsRaw.length) {
+            clientBody.innerHTML = '<tr><td colspan="4" class="text-muted">No client revenue for this month.</td></tr>';
+            clientSeoTotalEl.textContent = '(SEO: $0.00)';
+            clientToolTotalEl.textContent = '(Tool: $0.00)';
+        } else {
+            // aggregate by account name (case-insensitive)
+            const byAccount = new Map();
+            clientsRaw.forEach(c => {
+                const key = (c.client || '').toLowerCase();
+                if (!key) return;
+                const existing = byAccount.get(key) || { client: c.client, market: c.market, tool: 0, seo: 0 };
+                existing.tool += Number(c.toolRevenue || 0);
+                // SEO is monthly replicated; keep first non-zero if multiple
+                if (!existing.seo && c.seoRevenue) existing.seo = c.seoRevenue || 0;
+                // prefer first non-empty market
+                if (!existing.market && c.market) existing.market = c.market;
+                byAccount.set(key, existing);
+            });
+            const rows = Array.from(byAccount.values());
+            rows.sort((a, b) => (b.tool || 0) - (a.tool || 0));
+            const seoTotal = rows.reduce((sum, r) => sum + (Number(r.seo) || 0), 0);
+            const toolTotal = rows.reduce((sum, r) => sum + (Number(r.tool) || 0), 0);
+            clientSeoTotalEl.textContent = `(SEO: ${formatCurrency(seoTotal)})`;
+            clientToolTotalEl.textContent = `(Tool: ${formatCurrency(toolTotal)})`;
+            clientBody.innerHTML = rows.map(c => `
+                <tr>
+                    <td>${escapeHtml(c.client || '')}</td>
+                    <td>${escapeHtml(c.market || '')}</td>
+                    <td class="currency">${formatCurrency(c.tool || 0)}</td>
+                    <td class="currency">${formatCurrency(c.seo || 0)}</td>
+                </tr>
+            `).join('');
+        }
+    }
+
+    function escapeHtml(str) {
+        return String(str || '').replace(/[&<>"']/g, function (m) {
+            return ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#39;'
+            })[m];
+        });
+    }
+
+    function formatCurrency(n) {
+        const num = Number(n) || 0;
+        return '$' + num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 </script>
