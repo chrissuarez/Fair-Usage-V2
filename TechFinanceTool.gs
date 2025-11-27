@@ -10,6 +10,8 @@ function onOpen() {
     .addSeparator()
     .addItem('Step 1: Generate Data Engine', 'generateTechRunRate')
     .addItem('Step 2: Build Dashboard', 'buildDashboard')
+    .addSeparator()
+    .addItem('Create Tool Transactions Tab', 'ensureToolTransactionsTab')
     .addToUi();
 }
 
@@ -229,6 +231,40 @@ function buildDashboard() {
        .setFontWeight("bold").setFontSize(14).setBackground("#fff2cc")
        .setBorder(true, true, true, true, true, true).setHorizontalAlignment("center");
   sheet.setColumnWidth(1, 220);
+}
+
+// ==========================================
+// TOOL TRANSACTIONS TAB
+// ==========================================
+function ensureToolTransactionsTab() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const SHEET_NAME = "Tool Transactions";
+  const headers = ["Date", "Tool / Vendor", "Category", "Amount", "Notes", "Month", "Year"];
+
+  let sheet = ss.getSheetByName(SHEET_NAME);
+  const isNew = !sheet;
+  if (!sheet) sheet = ss.insertSheet(SHEET_NAME);
+
+  // Seed headers without clearing any existing data
+  sheet.getRange(1, 1, 1, headers.length)
+    .setValues([headers])
+    .setFontWeight("bold")
+    .setBackground("#f1f3f4");
+  sheet.setFrozenRows(1);
+
+  // Basic formatting for entry columns
+  sheet.getRange("A2:A").setNumberFormat("yyyy-mm-dd");
+  sheet.getRange("D2:D").setNumberFormat("$#,##0.00");
+  sheet.getRange("F2:F").setNumberFormat("MMM yyyy");
+
+  // Seed helper formulas on a fresh sheet so month/year auto-populate from Date
+  if (isNew && sheet.getLastRow() < 2) {
+    sheet.getRange("F2").setFormula('=IF(A2="","",TEXT(A2,"mmm-yyyy"))');
+    sheet.getRange("G2").setFormula('=IF(A2="","",YEAR(A2))');
+  }
+
+  headers.forEach((_, idx) => sheet.autoResizeColumn(idx + 1));
+  SpreadsheetApp.getUi().alert(`"${SHEET_NAME}" tab is ready. Add transactions starting in row 2.`);
 }
 
 // ==========================================
