@@ -11,6 +11,8 @@ The scripts assume a Google Sheet with the following tabs:
 - `SEO Client Revenue` – revenue per account/market (headers on row 1, data starting row 2). Columns C–E map to 2024–2026 revenue.
 - `Tool Revenue` – tech-fee revenue by account (headers on row 4, data starting row 5). Columns B–D map to 2024–2026 revenue.
 - `Setup` – configuration table (created automatically if missing).
+- `Tool Capacity Config` – manage tool costs and capacities/limits (auto-created from the web UI Settings tab).
+- `Tech Tier Config` – override tier allocations/fees used for entitlements; zero-revenue accounts are excluded.
 - Optional: `Adjustments` and `OnCrawl Stats` – required if you run the OnCrawl budget helper.
 
 ## Installation
@@ -34,6 +36,12 @@ On spreadsheet open (`onOpen`), a **Tech Fee Tools** menu is added with three ac
 
 - **Create/Update Setup Tab** (`EnsureSetupTab_`)  
   Creates the `Setup` configuration tab (and pads it to four columns) if it is missing or sparsely populated. It also back-fills newer sections—crawl cadence rules, OnCrawl starter caps, and site size multipliers—on older sheets.
+
+- **Tool Capacity Config (UI)**  
+  In the web app Settings tab, you can append/edit tool rows (Tool, Annual Cost, Capacity/Limit, Unit, Notes). Writes to the `Tool Capacity Config` sheet and drives the capacity vs allocation summary.
+
+- **Tech Tier Config (UI)**  
+  In the web app Settings tab, you can edit tier allocations/fees (Accu, Semrush, OnCrawl, Annual Fee, Notes). Writes to the `Tech Tier Config` sheet and feeds the entitlements view. Zero-revenue accounts are excluded from entitlements.
 
 ## Setup Tab Structure
 `EnsureSetupTab_` expects (and seeds) the following blocks, each separated by a blank row:

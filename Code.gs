@@ -1284,8 +1284,46 @@ function readTierConfig_() {
       accu: toNumber_(r[1]),
       semrush: toNumber_(r[2]),
       oncrawl: toNumber_(r[3]),
-      fee: toNumber_(r[4])
+      fee: toNumber_(r[4]),
+      notes: safeStr_(r[5])
     }));
+}
+
+function saveTierConfig(rows) {
+  const sh = ensureTechTierConfig_();
+  const headers = ["Tier", "Accu Keywords", "Semrush Keywords", "OnCrawl URLs", "Annual Fee", "Notes"];
+  sh.clearContents();
+  sh.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight("bold").setBackground("#efefef");
+  if (rows && rows.length) {
+    const out = rows.map(r => [
+      safeStr_(r.name),
+      toNumber_(r.accu),
+      toNumber_(r.semrush),
+      toNumber_(r.oncrawl),
+      toNumber_(r.fee),
+      safeStr_(r.notes)
+    ]);
+    sh.getRange(2, 1, out.length, headers.length).setValues(out);
+    sh.getRange(2, 2, out.length, 3).setNumberFormat("#,##0");
+    sh.getRange(2, 5, out.length, 1).setNumberFormat("#,##0.00");
+  }
+  sh.setFrozenRows(1);
+  for (let c = 1; c <= headers.length; c++) sh.autoResizeColumn(c);
+  return `Saved ${rows ? rows.length : 0} tier rows.`;
+}
+
+function getTierConfig_Web() {
+  return readTierConfig_();
+}
+
+function saveTierConfig_Web(rows) {
+  if (!Array.isArray(rows)) throw new Error("Rows must be an array.");
+  return saveTierConfig(rows);
+}
+
+function EnsureTechTierConfig_Web() {
+  ensureTechTierConfig_();
+  return "Tech Tier Config ensured.";
 }
 
 /*************************

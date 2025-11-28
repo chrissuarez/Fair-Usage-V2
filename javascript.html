@@ -642,16 +642,25 @@
         statusDiv.className = "status-msg";
         google.script.run
             .withSuccessHandler(function (rows) {
-                tierConfigLoaded = true;
-                renderTierConfigTable(rows || []);
-                statusDiv.textContent = "Loaded.";
-                statusDiv.className = "status-msg success";
+                // after ensuring tab, pull data
+                google.script.run
+                    .withSuccessHandler(function (rows) {
+                        tierConfigLoaded = true;
+                        renderTierConfigTable(rows || []);
+                        statusDiv.textContent = "Loaded.";
+                        statusDiv.className = "status-msg success";
+                    })
+                    .withFailureHandler(function (err) {
+                        statusDiv.textContent = "Error: " + err.message;
+                        statusDiv.className = "status-msg error";
+                    })
+                    .getTierConfig_Web();
             })
             .withFailureHandler(function (err) {
                 statusDiv.textContent = "Error: " + err.message;
                 statusDiv.className = "status-msg error";
             })
-            .getTierConfig_Web();
+            .EnsureTechTierConfig_Web();
     }
 
     function renderTierConfigTable(rows) {
