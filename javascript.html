@@ -17,7 +17,11 @@
             navItems[2].classList.add('active');
             loadCashflowData(); // Load data when tab is opened
         }
-        if (sectionId === 'settings') navItems[3].classList.add('active');
+        if (sectionId === 'entitlements') {
+            navItems[3].classList.add('active');
+            loadEntitlements();
+        }
+        if (sectionId === 'settings') navItems[4].classList.add('active');
     }
 
     // ACTIONS
@@ -76,6 +80,45 @@
             .EnsureSetupTab_Web();
     }
 
+    function runEnsureToolConfig() {
+        const statusDiv = document.getElementById('tool-config-status');
+        statusDiv.textContent = "Ensuring tab...";
+        statusDiv.className = "status-msg";
+        google.script.run
+            .withSuccessHandler(function (msg) {
+                statusDiv.textContent = msg;
+                statusDiv.className = "status-msg success";
+            })
+            .withFailureHandler(function (err) {
+                statusDiv.textContent = "Error: " + err.message;
+                statusDiv.className = "status-msg error";
+            })
+            .EnsureToolConfigTab_Web();
+    }
+
+    function addToolConfig() {
+        const statusDiv = document.getElementById('tool-config-status');
+        const payload = {
+            tool: document.getElementById('tool-name').value,
+            cost: document.getElementById('tool-cost').value,
+            capacity: document.getElementById('tool-capacity').value,
+            unit: document.getElementById('tool-unit').value,
+            notes: document.getElementById('tool-notes').value
+        };
+        statusDiv.textContent = "Adding...";
+        statusDiv.className = "status-msg";
+        google.script.run
+            .withSuccessHandler(function (msg) {
+                statusDiv.textContent = msg;
+                statusDiv.className = "status-msg success";
+            })
+            .withFailureHandler(function (err) {
+                statusDiv.textContent = "Error: " + err.message;
+                statusDiv.className = "status-msg error";
+            })
+            .appendToolConfig_Web(payload);
+    }
+
     // --- CASHFLOW DASHBOARD LOGIC ---
 
     let chartInstance = null;
@@ -84,6 +127,7 @@
     let selectedMonthIdx = 0;
     let rangeStartIdx = 0;
     let rangeEndIdx = 0;
+    let entitlementsLoaded = false;
 
     function loadCashflowData() {
         if (baseData) return; // Already loaded
@@ -102,6 +146,44 @@
                 alert("Failed to load cashflow data: " + err.message);
             })
             .getCashflowData_Web();
+    }
+
+    // --- ENTITLEMENTS ---
+    function loadEntitlements() {
+        if (entitlementsLoaded) return;
+        google.script.run
+            .withSuccessHandler(function (data) {
+                entitlementsLoaded = true;
+                document.getElementById('ent-shared').textContent = formatCurrency(data.sharedCost);
+                document.getElementById('ent-dedicated').textContent = formatCurrency(data.clientFundedCost);
+                document.getElementById('ent-revenue').textContent = formatCurrency(data.totalToolRevenue);
+                const balEl = document.getElementById('ent-balance');
+                balEl.textContent = formatCurrency(data.remainingBalance);
+                balEl.style.color = data.remainingBalance >= 0 ? '#27AE60' : '#EB5757';
+
+                const tbody = document.getElementById('ent-table-body');
+                if (!data.rows || !data.rows.length) {
+                    tbody.innerHTML = '<tr><td colspan="9" class="text-muted">No clients found.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = data.rows.map(r => `
+                    <tr>
+                        <td>${escapeHtml(r.account)}</td>
+                        <td>${escapeHtml(r.market)}</td>
+                        <td class="currency">${formatCurrency(r.revenue)}</td>
+                        <td>${escapeHtml(r.tier)}</td>
+                        <td class="currency">${formatCurrency(r.fee)}</td>
+                        <td class="currency">${formatNumber(r.accu)}</td>
+                        <td class="currency">${formatNumber(r.semrush)}</td>
+                        <td class="currency">${formatNumber(r.oncrawl)}</td>
+                        <td>${escapeHtml(r.cloud)}</td>
+                    </tr>
+                `).join('');
+            })
+            .withFailureHandler(function (err) {
+                alert("Failed to load entitlements: " + err.message);
+            })
+            .getTechEntitlements_Web();
     }
 
     function initRangeInputs() {
@@ -442,5 +524,10 @@
     function formatCurrency(n) {
         const num = Number(n) || 0;
         return '$' + num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function formatNumber(n) {
+        const num = Number(n) || 0;
+        return num.toLocaleString();
     }
 </script>

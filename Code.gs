@@ -1145,3 +1145,133 @@ function getCashflowData() {
     clientRevenue: clientRevenue
   };
 }
+
+/*************************
+ * 5) TOOL CONFIG TAB (Costs & Capacity)
+ *************************/
+function EnsureToolConfigTab_() {
+  const ss = SpreadsheetApp.getActive();
+  const name = "Tool Capacity Config";
+  let sh = ss.getSheetByName(name);
+  if (!sh) sh = ss.insertSheet(name);
+  const headers = [["Tool", "Annual Cost", "Capacity / Limit", "Unit", "Notes"]];
+  sh.getRange(1, 1, 1, headers[0].length).setValues(headers).setFontWeight("bold").setBackground("#efefef");
+  if (sh.getLastRow() < 2) {
+    sh.getRange(2, 1, 1, headers[0].length).setValues([["Semrush", 116049, 400, "Keywords", "Enterprise license"]]);
+  }
+  sh.setFrozenRows(1);
+  for (let c = 1; c <= headers[0].length; c++) sh.autoResizeColumn(c);
+  return `Tab "${name}" ensured.`;
+}
+
+function appendToolConfig(tool, cost, capacity, unit, notes) {
+  const ss = SpreadsheetApp.getActive();
+  const name = "Tool Capacity Config";
+  let sh = ss.getSheetByName(name);
+  if (!sh) {
+    EnsureToolConfigTab_();
+    sh = ss.getSheetByName(name);
+  }
+  const values = [
+    [
+      safeStr_(tool),
+      toNumber_(cost),
+      toNumber_(capacity),
+      safeStr_(unit),
+      safeStr_(notes)
+    ]
+  ];
+  const row = sh.getLastRow() + 1;
+  sh.getRange(row, 1, 1, values[0].length).setValues(values);
+  return `Added tool "${tool}"`;
+}
+
+function appendToolConfig_Web(payload) {
+  if (!payload) throw new Error("Missing payload");
+  const tool = payload.tool || "";
+  if (!tool.trim()) throw new Error("Tool name is required.");
+  return appendToolConfig(tool, payload.cost, payload.capacity, payload.unit, payload.notes);
+}
+
+/*************************
+ * 6) TECH ENTITLEMENTS (Rate Card 2025)
+ * Uses Strategic_Tech_Budget_Rate_Card_2025.md values, ignores Setup tab.
+ *************************/
+function getTechEntitlements() {
+  const ss = SpreadsheetApp.getActive();
+  const SEO_SHEET = 'SEO Client Revenue';
+  const TOOL_SHEET = 'Tool Revenue';
+  const YEAR = 2025;
+  const SEO_YEAR_COLS = { 2024: 3, 2025: 4, 2026: 5 };
+  const TOOL_YEAR_COLS = { 2024: 2, 2025: 3, 2026: 4 };
+  const sharedCost = 176145; // SEO Shared Stack
+  const clientFundedCost = 26469; // Ellos + ORPI passthrough
+
+  const seoSh = ss.getSheetByName(SEO_SHEET);
+  const toolSh = ss.getSheetByName(TOOL_SHEET);
+  if (!seoSh) throw new Error(`Missing sheet: ${SEO_SHEET}`);
+  if (!toolSh) throw new Error(`Missing sheet: ${TOOL_SHEET}`);
+
+  const seoYearCol = SEO_YEAR_COLS[YEAR];
+  const toolYearCol = TOOL_YEAR_COLS[YEAR];
+  if (!seoYearCol || !toolYearCol) throw new Error(`Year ${YEAR} not supported.`);
+
+  // Load SEO revenue
+  const seoLastRow = getLastRow_(seoSh, 1, 2);
+  const seoValues = seoLastRow >= 2 ? seoSh.getRange(2, 1, seoLastRow - 1 + 1, Math.max(2, seoYearCol)).getValues() : [];
+  const clients = seoValues
+    .map(r => ({
+      account: safeStr_(r[0]),
+      market: safeStr_(r[1]),
+      revenue: toNumber_(r[seoYearCol - 1])
+    }))
+    .filter(r => r.account);
+
+  // Load tool revenue total
+  const toolLastRow = getLastRow_(toolSh, 1, 5);
+  const toolValues = toolLastRow >= 5 ? toolSh.getRange(5, 1, toolLastRow - 5 + 1, Math.max(1, toolYearCol)).getValues() : [];
+  const totalToolRevenue = toolValues.reduce((sum, r) => sum + (toNumber_(r[toolYearCol - 1]) || 0), 0);
+
+  // Tier thresholds and entitlements (from rate card)
+  const tiers = [
+    { name: 'Tech Starter', max: 75000, accu: 400, semrush: 100, oncrawl: 4000, cloud: false, fee: 2400 },
+    { name: 'Tech Essentials', max: 200000, accu: 800, semrush: 200, oncrawl: 8000, cloud: false, fee: 6000 },
+    { name: 'Tech Pro', max: 500000, accu: 1500, semrush: 300, oncrawl: 18000, cloud: false, fee: 12000 },
+    { name: 'Tech Enterprise', max: Number.POSITIVE_INFINITY, accu: 3000, semrush: 400, oncrawl: 40000, cloud: true, fee: 24000 }
+  ];
+
+  const rows = clients.map(c => {
+    const tier = tiers.find(t => c.revenue <= t.max) || tiers[tiers.length - 1];
+    return {
+      account: c.account,
+      market: c.market,
+      revenue: c.revenue,
+      tier: tier.name,
+      accu: tier.accu,
+      semrush: tier.semrush,
+      oncrawl: tier.oncrawl,
+      cloud: tier.cloud ? 'Included' : '—',
+      fee: tier.fee
+    };
+  }).sort((a, b) => b.revenue - a.revenue);
+
+  const remainingBalance = totalToolRevenue - sharedCost - clientFundedCost;
+
+  return {
+    year: YEAR,
+    sharedCost: sharedCost,
+    clientFundedCost: clientFundedCost,
+    totalCost: sharedCost + clientFundedCost,
+    totalToolRevenue: totalToolRevenue,
+    remainingBalance: remainingBalance,
+    rows: rows
+  };
+}
+
+function getTechEntitlements_Web() {
+  return getTechEntitlements();
+}
+
+function EnsureToolConfigTab_Web() {
+  return EnsureToolConfigTab_();
+}

@@ -48,6 +48,10 @@
                         <span class="nav-icon">📈</span>
                         <span class="nav-text">Cashflow</span>
                     </li>
+                    <li class="nav-item" onclick="showSection('entitlements')">
+                        <span class="nav-icon">📑</span>
+                        <span class="nav-text">Tech Entitlements</span>
+                    </li>
                     <li class="nav-item" onclick="showSection('settings')">
                         <span class="nav-icon">⚙️</span>
                         <span class="nav-text">Settings</span>
@@ -124,6 +128,49 @@
                                 Run Comparison
                             </button>
                             <div id="tf-status" class="status-message"></div>
+                </section>
+
+                <!-- ENTITLEMENTS SECTION -->
+                <section id="entitlements-section" class="content-section">
+                    <div class="section-header">
+                        <h2>Tech Entitlements</h2>
+                        <p class="subtitle">Based on 2025 rate card (ignores Setup tab).</p>
+                    </div>
+
+                    <div class="card-grid">
+                        <div class="card">
+                            <h3>Stack Economics</h3>
+                            <div class="stat-row"><span class="stat-label">Shared Stack Cost</span><span class="stat-value" id="ent-shared">$0.00</span></div>
+                            <div class="stat-row"><span class="stat-label">Client-Funded Cost</span><span class="stat-value" id="ent-dedicated">$0.00</span></div>
+                            <div class="stat-row"><span class="stat-label">Total Tool Revenue</span><span class="stat-value" id="ent-revenue">$0.00</span></div>
+                            <div class="stat-row"><span class="stat-label">Remaining Balance</span><span class="stat-value" id="ent-balance">$0.00</span></div>
+                        </div>
+                    </div>
+
+                    <div class="card full-width-card" style="margin-top:24px;">
+                        <div class="section-header" style="margin-bottom:12px;">
+                            <h3>Client Entitlements (2025)</h3>
+                            <p class="subtitle" style="margin:0;">Tiered SKU mapping from Strategic_Tech_Budget_Rate_Card_2025.md</p>
+                        </div>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Account</th>
+                                    <th>Market</th>
+                                    <th class="currency">Revenue (2025)</th>
+                                    <th>Tier</th>
+                                    <th class="currency">Annual Fee</th>
+                                    <th class="currency">Accu Keywords</th>
+                                    <th class="currency">Semrush Keywords</th>
+                                    <th class="currency">OnCrawl URLs</th>
+                                    <th>Cloud</th>
+                                </tr>
+                            </thead>
+                            <tbody id="ent-table-body">
+                                <tr><td colspan="9" class="text-muted">Loading…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </section>
 
                 <!-- CASHFLOW SECTION -->
@@ -277,6 +324,35 @@
                             <p>Ensure the "Setup" tab exists and has the latest structure.</p>
                             <button class="btn-secondary" onclick="runEnsureSetup()">Update Setup Tab</button>
                             <div id="setup-status" class="status-message"></div>
+                        </div>
+                        <div class="card">
+                            <h3>Tool Capacity Config</h3>
+                            <p>Add tool cost and capacity/limits.</p>
+                            <div class="form-group">
+                                <label>Tool Name</label>
+                                <input type="text" id="tool-name" class="input-select" placeholder="e.g. Semrush" />
+                            </div>
+                            <div class="form-group">
+                                <label>Annual Cost</label>
+                                <input type="number" id="tool-cost" class="input-select" placeholder="116049" />
+                            </div>
+                            <div class="form-group">
+                                <label>Capacity / Limit</label>
+                                <input type="number" id="tool-capacity" class="input-select" placeholder="400" />
+                            </div>
+                            <div class="form-group">
+                                <label>Unit</label>
+                                <input type="text" id="tool-unit" class="input-select" placeholder="Keywords / URLs / Seats" />
+                            </div>
+                            <div class="form-group">
+                                <label>Notes</label>
+                                <input type="text" id="tool-notes" class="input-select" placeholder="Enterprise license" />
+                            </div>
+                            <div class="grid-2">
+                                <button class="btn-secondary" onclick="runEnsureToolConfig()">Ensure Tab</button>
+                                <button class="btn-primary" onclick="addToolConfig()">Add Tool</button>
+                            </div>
+                            <div id="tool-config-status" class="status-message"></div>
                         </div>
                     </div>
                 </section>
