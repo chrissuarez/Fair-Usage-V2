@@ -1249,7 +1249,47 @@ function saveToolConfig_Web(rows) {
 }
 
 /*************************
- * 6) TECH ENTITLEMENTS (Rate Card 2025)
+ * 6) TECH TIER CONFIG (allocations override)
+ *************************/
+function ensureTechTierConfig_() {
+  const ss = SpreadsheetApp.getActive();
+  const name = "Tech Tier Config";
+  let sh = ss.getSheetByName(name);
+  const headers = [["Tier", "Accu Keywords", "Semrush Keywords", "OnCrawl URLs", "Annual Fee", "Notes"]];
+  if (!sh) {
+    sh = ss.insertSheet(name);
+    sh.getRange(1, 1, 1, headers[0].length).setValues(headers).setFontWeight("bold").setBackground("#efefef");
+    const seed = [
+      ["Tech Starter", 400, 100, 4000, 2400, "Retainers < $75k"],
+      ["Tech Essentials", 800, 200, 8000, 6000, "Tier C ($75k-$200k)"],
+      ["Tech Pro", 1500, 300, 18000, 12000, "Tier B ($200k+)"],
+      ["Tech Enterprise", 3000, 400, 40000, 24000, "Tier A (Global)"]
+    ];
+    sh.getRange(2, 1, seed.length, headers[0].length).setValues(seed);
+    sh.setFrozenRows(1);
+    for (let c = 1; c <= headers[0].length; c++) sh.autoResizeColumn(c);
+  }
+  return sh;
+}
+
+function readTierConfig_() {
+  const sh = ensureTechTierConfig_();
+  const last = sh.getLastRow();
+  if (last < 2) return [];
+  const values = sh.getRange(2, 1, last - 1, 6).getValues();
+  return values
+    .filter(r => safeStr_(r[0]))
+    .map(r => ({
+      name: safeStr_(r[0]),
+      accu: toNumber_(r[1]),
+      semrush: toNumber_(r[2]),
+      oncrawl: toNumber_(r[3]),
+      fee: toNumber_(r[4])
+    }));
+}
+
+/*************************
+ * 7) TECH ENTITLEMENTS (Rate Card 2025)
  * Uses Strategic_Tech_Budget_Rate_Card_2025.md values, ignores Setup tab.
  *************************/
 function getTechEntitlements() {
@@ -1287,15 +1327,30 @@ function getTechEntitlements() {
   const toolValues = toolLastRow >= 5 ? toolSh.getRange(5, 1, toolLastRow - 5 + 1, Math.max(1, toolYearCol)).getValues() : [];
   const totalToolRevenue = toolValues.reduce((sum, r) => sum + (toNumber_(r[toolYearCol - 1]) || 0), 0);
 
-  // Tier thresholds and entitlements (from rate card)
+  // Tier thresholds and entitlements (config overrides default)
+  const tierOverrides = readTierConfig_();
   const tiers = [
     { name: 'Tech Starter', max: 75000, accu: 400, semrush: 100, oncrawl: 4000, cloud: false, fee: 2400 },
     { name: 'Tech Essentials', max: 200000, accu: 800, semrush: 200, oncrawl: 8000, cloud: false, fee: 6000 },
     { name: 'Tech Pro', max: 500000, accu: 1500, semrush: 300, oncrawl: 18000, cloud: false, fee: 12000 },
     { name: 'Tech Enterprise', max: Number.POSITIVE_INFINITY, accu: 3000, semrush: 400, oncrawl: 40000, cloud: true, fee: 24000 }
-  ];
+  ].map(t => {
+    const o = tierOverrides.find(x => x.name.toLowerCase() === t.name.toLowerCase());
+    return o ? {
+      name: t.name,
+      max: t.max,
+      accu: o.accu || t.accu,
+      semrush: o.semrush || t.semrush,
+      oncrawl: o.oncrawl || t.oncrawl,
+      cloud: t.cloud,
+      fee: o.fee || t.fee
+    } : t;
+  });
 
   const rows = clients.map(c => {
+    if (c.revenue <= 0) {
+      return null;
+    }
     const tier = tiers.find(t => c.revenue <= t.max) || tiers[tiers.length - 1];
     return {
       account: c.account,
@@ -1308,7 +1363,7 @@ function getTechEntitlements() {
       cloud: tier.cloud ? 'Included' : '—',
       fee: tier.fee
     };
-  }).sort((a, b) => b.revenue - a.revenue);
+  }).filter(Boolean).sort((a, b) => b.revenue - a.revenue);
 
   const remainingBalance = totalToolRevenue - sharedCost - clientFundedCost;
 
