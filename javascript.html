@@ -24,6 +24,7 @@
         if (sectionId === 'settings') {
             navItems[4].classList.add('active');
             loadToolConfig();
+            loadTierConfig();
         }
     }
 
@@ -132,6 +133,7 @@
     let rangeEndIdx = 0;
     let entitlementsLoaded = false;
     let toolConfigLoaded = false;
+    let tierConfigLoaded = false;
 
     function loadCashflowData() {
         if (baseData) return; // Already loaded
@@ -630,5 +632,80 @@
                 statusDiv.className = "status-msg error";
             })
             .saveToolConfig_Web(rows);
+    }
+
+    // --- TIER CONFIG MANAGEMENT ---
+    function loadTierConfig(force) {
+        if (tierConfigLoaded && !force) return;
+        const statusDiv = document.getElementById('tier-config-status');
+        statusDiv.textContent = "Loading...";
+        statusDiv.className = "status-msg";
+        google.script.run
+            .withSuccessHandler(function (rows) {
+                tierConfigLoaded = true;
+                renderTierConfigTable(rows || []);
+                statusDiv.textContent = "Loaded.";
+                statusDiv.className = "status-msg success";
+            })
+            .withFailureHandler(function (err) {
+                statusDiv.textContent = "Error: " + err.message;
+                statusDiv.className = "status-msg error";
+            })
+            .getTierConfig_Web();
+    }
+
+    function renderTierConfigTable(rows) {
+        const tbody = document.getElementById('tier-config-table-body');
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="6" class="text-muted">No tier rows. Seeded defaults are in the sheet.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = rows.map((r, idx) => `
+            <tr data-row="${idx}">
+                <td><input class="input-select" type="text" value="${escapeHtml(r.name || '')}" /></td>
+                <td><input class="input-select" type="number" value="${escapeHtml(r.accu || '')}" /></td>
+                <td><input class="input-select" type="number" value="${escapeHtml(r.semrush || '')}" /></td>
+                <td><input class="input-select" type="number" value="${escapeHtml(r.oncrawl || '')}" /></td>
+                <td><input class="input-select" type="number" value="${escapeHtml(r.fee || '')}" /></td>
+                <td><input class="input-select" type="text" value="${escapeHtml(r.notes || '')}" /></td>
+            </tr>
+        `).join('');
+    }
+
+    function saveTierConfig() {
+        const statusDiv = document.getElementById('tier-config-status');
+        const tbody = document.getElementById('tier-config-table-body');
+        const rows = [];
+        tbody.querySelectorAll('tr').forEach(tr => {
+            const inputs = tr.querySelectorAll('input');
+            if (inputs.length === 6) {
+                const name = inputs[0].value.trim();
+                if (!name) return;
+                rows.push({
+                    name: name,
+                    accu: inputs[1].value,
+                    semrush: inputs[2].value,
+                    oncrawl: inputs[3].value,
+                    fee: inputs[4].value,
+                    notes: inputs[5].value
+                });
+            }
+        });
+        statusDiv.textContent = "Saving...";
+        statusDiv.className = "status-msg";
+        google.script.run
+            .withSuccessHandler(function (msg) {
+                statusDiv.textContent = msg;
+                statusDiv.className = "status-msg success";
+                tierConfigLoaded = false;
+                entitlementsLoaded = false;
+                loadTierConfig(true);
+                loadEntitlements(true);
+            })
+            .withFailureHandler(function (err) {
+                statusDiv.textContent = "Error: " + err.message;
+                statusDiv.className = "status-msg error";
+            })
+            .saveTierConfig_Web(rows);
     }
 </script>

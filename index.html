@@ -395,6 +395,32 @@
                                 </div>
                             </div>
                         </div>
+                        <div class="card">
+                            <h3>Tech Tier Config</h3>
+                            <p>Edit tier allocations (ignores Setup tab).</p>
+                            <div class="card full-width-card">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Tier</th>
+                                            <th class="currency">Accu</th>
+                                            <th class="currency">Semrush</th>
+                                            <th class="currency">OnCrawl</th>
+                                            <th class="currency">Annual Fee</th>
+                                            <th>Notes</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tier-config-table-body">
+                                        <tr><td colspan="6" class="text-muted">Loading…</td></tr>
+                                    </tbody>
+                                </table>
+                                <div class="grid-2" style="margin-top:12px;">
+                                    <button class="btn-secondary" onclick="loadTierConfig(true)">Refresh</button>
+                                    <button class="btn-primary" onclick="saveTierConfig()">Save</button>
+                                </div>
+                                <div id="tier-config-status" class="status-message"></div>
+                            </div>
+                        </div>
                     </div>
                 </section>
 
