@@ -1193,6 +1193,61 @@ function appendToolConfig_Web(payload) {
   return appendToolConfig(tool, payload.cost, payload.capacity, payload.unit, payload.notes);
 }
 
+function getToolConfig_() {
+  const ss = SpreadsheetApp.getActive();
+  const name = "Tool Capacity Config";
+  const sh = ss.getSheetByName(name);
+  if (!sh) return [];
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return [];
+  const values = sh.getRange(2, 1, lastRow - 1, 5).getValues();
+  return values
+    .filter(r => safeStr_(r[0]))
+    .map(r => ({
+      tool: safeStr_(r[0]),
+      cost: toNumber_(r[1]),
+      capacity: toNumber_(r[2]),
+      unit: safeStr_(r[3]),
+      notes: safeStr_(r[4])
+    }));
+}
+
+function saveToolConfig(rows) {
+  const ss = SpreadsheetApp.getActive();
+  const name = "Tool Capacity Config";
+  let sh = ss.getSheetByName(name);
+  if (!sh) {
+    EnsureToolConfigTab_();
+    sh = ss.getSheetByName(name);
+  }
+  const headers = ["Tool", "Annual Cost", "Capacity / Limit", "Unit", "Notes"];
+  sh.clearContents();
+  sh.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight("bold").setBackground("#efefef");
+  if (rows && rows.length) {
+    const out = rows.map(r => [
+      safeStr_(r.tool),
+      toNumber_(r.cost),
+      toNumber_(r.capacity),
+      safeStr_(r.unit),
+      safeStr_(r.notes)
+    ]);
+    sh.getRange(2, 1, out.length, headers.length).setValues(out);
+    sh.getRange(2, 2, out.length, 2).setNumberFormat("#,##0.00");
+  }
+  sh.setFrozenRows(1);
+  for (let c = 1; c <= headers.length; c++) sh.autoResizeColumn(c);
+  return `Saved ${rows ? rows.length : 0} tool rows.`;
+}
+
+function getToolConfig_Web() {
+  return getToolConfig_();
+}
+
+function saveToolConfig_Web(rows) {
+  if (!Array.isArray(rows)) throw new Error("Rows must be an array.");
+  return saveToolConfig(rows);
+}
+
 /*************************
  * 6) TECH ENTITLEMENTS (Rate Card 2025)
  * Uses Strategic_Tech_Budget_Rate_Card_2025.md values, ignores Setup tab.
@@ -1257,6 +1312,45 @@ function getTechEntitlements() {
 
   const remainingBalance = totalToolRevenue - sharedCost - clientFundedCost;
 
+  // Capacity summary using Tool Capacity Config
+  const toolConfig = getToolConfig_();
+  const capMap = {};
+  toolConfig.forEach(t => {
+    const key = safeStr_(t.tool).toLowerCase();
+    if (!key) return;
+    if (key.indexOf("accu") >= 0) capMap.accu = t;
+    if (key.indexOf("semrush") >= 0) capMap.semrush = t;
+    if (key.indexOf("oncrawl") >= 0) capMap.oncrawl = t;
+  });
+
+  const sumAccu = rows.reduce((s, r) => s + (r.accu || 0), 0);
+  const sumSem = rows.reduce((s, r) => s + (r.semrush || 0), 0);
+  const sumOnc = rows.reduce((s, r) => s + (r.oncrawl || 0), 0);
+
+  const capacitySummary = [
+    {
+      name: "AccuRanker",
+      capacity: capMap.accu ? capMap.accu.capacity : 0,
+      unit: capMap.accu ? capMap.accu.unit : "Keywords",
+      allocated: sumAccu,
+      remaining: (capMap.accu ? capMap.accu.capacity : 0) - sumAccu
+    },
+    {
+      name: "Semrush",
+      capacity: capMap.semrush ? capMap.semrush.capacity : 0,
+      unit: capMap.semrush ? capMap.semrush.unit : "Keywords",
+      allocated: sumSem,
+      remaining: (capMap.semrush ? capMap.semrush.capacity : 0) - sumSem
+    },
+    {
+      name: "OnCrawl",
+      capacity: capMap.oncrawl ? capMap.oncrawl.capacity : 0,
+      unit: capMap.oncrawl ? capMap.oncrawl.unit : "URLs",
+      allocated: sumOnc,
+      remaining: (capMap.oncrawl ? capMap.oncrawl.capacity : 0) - sumOnc
+    }
+  ];
+
   return {
     year: YEAR,
     sharedCost: sharedCost,
@@ -1264,7 +1358,9 @@ function getTechEntitlements() {
     totalCost: sharedCost + clientFundedCost,
     totalToolRevenue: totalToolRevenue,
     remainingBalance: remainingBalance,
-    rows: rows
+    rows: rows,
+    capacitySummary: capacitySummary,
+    toolConfig: toolConfig
   };
 }
 

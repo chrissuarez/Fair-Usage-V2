@@ -145,6 +145,23 @@
                             <div class="stat-row"><span class="stat-label">Total Tool Revenue</span><span class="stat-value" id="ent-revenue">$0.00</span></div>
                             <div class="stat-row"><span class="stat-label">Remaining Balance</span><span class="stat-value" id="ent-balance">$0.00</span></div>
                         </div>
+                        <div class="card">
+                            <h3>Capacity vs Allocations</h3>
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Tool</th>
+                                        <th class="currency">Capacity</th>
+                                        <th>Unit</th>
+                                        <th class="currency">Allocated</th>
+                                        <th class="currency">Remaining</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="ent-capacity-body">
+                                    <tr><td colspan="5" class="text-muted">Loading…</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
 
                     <div class="card full-width-card" style="margin-top:24px;">
@@ -353,6 +370,30 @@
                                 <button class="btn-primary" onclick="addToolConfig()">Add Tool</button>
                             </div>
                             <div id="tool-config-status" class="status-message"></div>
+                            <div class="card full-width-card" style="margin-top:16px;">
+                                <div class="section-header" style="margin-bottom:12px;">
+                                    <h3>Manage Tools</h3>
+                                    <p class="subtitle" style="margin:0;">Edit tool rows then save.</p>
+                                </div>
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Tool</th>
+                                            <th class="currency">Annual Cost</th>
+                                            <th class="currency">Capacity / Limit</th>
+                                            <th>Unit</th>
+                                            <th>Notes</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tool-config-table-body">
+                                        <tr><td colspan="5" class="text-muted">Loading…</td></tr>
+                                    </tbody>
+                                </table>
+                                <div class="grid-2" style="margin-top:12px;">
+                                    <button class="btn-secondary" onclick="loadToolConfig()">Refresh</button>
+                                    <button class="btn-primary" onclick="saveToolConfig()">Save</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </section>

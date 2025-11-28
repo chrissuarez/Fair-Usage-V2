@@ -21,7 +21,10 @@
             navItems[3].classList.add('active');
             loadEntitlements();
         }
-        if (sectionId === 'settings') navItems[4].classList.add('active');
+        if (sectionId === 'settings') {
+            navItems[4].classList.add('active');
+            loadToolConfig();
+        }
     }
 
     // ACTIONS
@@ -164,21 +167,36 @@
                 const tbody = document.getElementById('ent-table-body');
                 if (!data.rows || !data.rows.length) {
                     tbody.innerHTML = '<tr><td colspan="9" class="text-muted">No clients found.</td></tr>';
-                    return;
+                } else {
+                    tbody.innerHTML = data.rows.map(r => `
+                        <tr>
+                            <td>${escapeHtml(r.account)}</td>
+                            <td>${escapeHtml(r.market)}</td>
+                            <td class="currency">${formatCurrency(r.revenue)}</td>
+                            <td>${escapeHtml(r.tier)}</td>
+                            <td class="currency">${formatCurrency(r.fee)}</td>
+                            <td class="currency">${formatNumber(r.accu)}</td>
+                            <td class="currency">${formatNumber(r.semrush)}</td>
+                            <td class="currency">${formatNumber(r.oncrawl)}</td>
+                            <td>${escapeHtml(r.cloud)}</td>
+                        </tr>
+                    `).join('');
                 }
-                tbody.innerHTML = data.rows.map(r => `
-                    <tr>
-                        <td>${escapeHtml(r.account)}</td>
-                        <td>${escapeHtml(r.market)}</td>
-                        <td class="currency">${formatCurrency(r.revenue)}</td>
-                        <td>${escapeHtml(r.tier)}</td>
-                        <td class="currency">${formatCurrency(r.fee)}</td>
-                        <td class="currency">${formatNumber(r.accu)}</td>
-                        <td class="currency">${formatNumber(r.semrush)}</td>
-                        <td class="currency">${formatNumber(r.oncrawl)}</td>
-                        <td>${escapeHtml(r.cloud)}</td>
-                    </tr>
-                `).join('');
+
+                const capBody = document.getElementById('ent-capacity-body');
+                if (data.capacitySummary && data.capacitySummary.length) {
+                    capBody.innerHTML = data.capacitySummary.map(c => `
+                        <tr>
+                            <td>${escapeHtml(c.name)}</td>
+                            <td class="currency">${formatNumber(c.capacity || 0)}</td>
+                            <td>${escapeHtml(c.unit || '')}</td>
+                            <td class="currency">${formatNumber(c.allocated || 0)}</td>
+                            <td class="currency">${formatNumber(c.remaining || 0)}</td>
+                        </tr>
+                    `).join('');
+                } else {
+                    capBody.innerHTML = '<tr><td colspan="5" class="text-muted">No capacity data configured.</td></tr>';
+                }
             })
             .withFailureHandler(function (err) {
                 alert("Failed to load entitlements: " + err.message);
@@ -529,5 +547,76 @@
     function formatNumber(n) {
         const num = Number(n) || 0;
         return num.toLocaleString();
+    }
+
+    // --- TOOL CONFIG MANAGEMENT ---
+    function loadToolConfig(force) {
+        if (toolConfigLoaded && !force) return;
+        const statusDiv = document.getElementById('tool-config-status');
+        statusDiv.textContent = "Loading...";
+        statusDiv.className = "status-msg";
+        google.script.run
+            .withSuccessHandler(function (rows) {
+                toolConfigLoaded = true;
+                renderToolConfigTable(rows || []);
+                statusDiv.textContent = "Loaded.";
+                statusDiv.className = "status-msg success";
+            })
+            .withFailureHandler(function (err) {
+                statusDiv.textContent = "Error: " + err.message;
+                statusDiv.className = "status-msg error";
+            })
+            .getToolConfig_Web();
+    }
+
+    function renderToolConfigTable(rows) {
+        const tbody = document.getElementById('tool-config-table-body');
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-muted">No tool rows yet. Add one above.</td></tr>';
+            return;
+        }
+        tbody.innerHTML = rows.map((r, idx) => `
+            <tr data-row="${idx}">
+                <td><input class="input-select" type="text" value="${escapeHtml(r.tool || '')}" /></td>
+                <td><input class="input-select" type="number" value="${escapeHtml(r.cost || '')}" /></td>
+                <td><input class="input-select" type="number" value="${escapeHtml(r.capacity || '')}" /></td>
+                <td><input class="input-select" type="text" value="${escapeHtml(r.unit || '')}" /></td>
+                <td><input class="input-select" type="text" value="${escapeHtml(r.notes || '')}" /></td>
+            </tr>
+        `).join('');
+    }
+
+    function saveToolConfig() {
+        const statusDiv = document.getElementById('tool-config-status');
+        const tbody = document.getElementById('tool-config-table-body');
+        const rows = [];
+        tbody.querySelectorAll('tr').forEach(tr => {
+            const inputs = tr.querySelectorAll('input');
+            if (inputs.length === 5) {
+                const tool = inputs[0].value.trim();
+                if (!tool) return;
+                rows.push({
+                    tool: tool,
+                    cost: inputs[1].value,
+                    capacity: inputs[2].value,
+                    unit: inputs[3].value,
+                    notes: inputs[4].value
+                });
+            }
+        });
+        statusDiv.textContent = "Saving...";
+        statusDiv.className = "status-msg";
+        google.script.run
+            .withSuccessHandler(function (msg) {
+                statusDiv.textContent = msg;
+                statusDiv.className = "status-msg success";
+                toolConfigLoaded = false;
+                loadToolConfig(true);
+            })
+            .withFailureHandler(function (err) {
+                statusDiv.textContent = "Error: " + err.message;
+                statusDiv.className = "status-msg error";
+            })
+            .saveToolConfig_Web(rows);
     }
 </script>
