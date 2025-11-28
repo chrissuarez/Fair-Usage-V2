@@ -131,6 +131,7 @@
     let rangeStartIdx = 0;
     let rangeEndIdx = 0;
     let entitlementsLoaded = false;
+    let toolConfigLoaded = false;
 
     function loadCashflowData() {
         if (baseData) return; // Already loaded
@@ -152,8 +153,8 @@
     }
 
     // --- ENTITLEMENTS ---
-    function loadEntitlements() {
-        if (entitlementsLoaded) return;
+    function loadEntitlements(force) {
+        if (entitlementsLoaded && !force) return;
         google.script.run
             .withSuccessHandler(function (data) {
                 entitlementsLoaded = true;
@@ -556,17 +557,26 @@
         statusDiv.textContent = "Loading...";
         statusDiv.className = "status-msg";
         google.script.run
-            .withSuccessHandler(function (rows) {
-                toolConfigLoaded = true;
-                renderToolConfigTable(rows || []);
-                statusDiv.textContent = "Loaded.";
-                statusDiv.className = "status-msg success";
+            .withSuccessHandler(function () {
+                // after ensuring tab, load data
+                google.script.run
+                    .withSuccessHandler(function (rows) {
+                        toolConfigLoaded = true;
+                        renderToolConfigTable(rows || []);
+                        statusDiv.textContent = "Loaded.";
+                        statusDiv.className = "status-msg success";
+                    })
+                    .withFailureHandler(function (err) {
+                        statusDiv.textContent = "Error: " + err.message;
+                        statusDiv.className = "status-msg error";
+                    })
+                    .getToolConfig_Web();
             })
             .withFailureHandler(function (err) {
                 statusDiv.textContent = "Error: " + err.message;
                 statusDiv.className = "status-msg error";
             })
-            .getToolConfig_Web();
+            .EnsureToolConfigTab_Web();
     }
 
     function renderToolConfigTable(rows) {
@@ -607,11 +617,13 @@
         statusDiv.textContent = "Saving...";
         statusDiv.className = "status-msg";
         google.script.run
-            .withSuccessHandler(function (msg) {
-                statusDiv.textContent = msg;
+            .withSuccessHandler(function (rows) {
+                statusDiv.textContent = rows;
                 statusDiv.className = "status-msg success";
                 toolConfigLoaded = false;
+                entitlementsLoaded = false;
                 loadToolConfig(true);
+                loadEntitlements(true);
             })
             .withFailureHandler(function (err) {
                 statusDiv.textContent = "Error: " + err.message;
