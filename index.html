@@ -44,6 +44,10 @@
                         <span class="nav-icon">💰</span>
                         <span class="nav-text">Tech Fee</span>
                     </li>
+                    <li class="nav-item" onclick="showSection('rev-ops')">
+                        <span class="nav-icon">🧭</span>
+                        <span class="nav-text">Revenue Ops</span>
+                    </li>
                     <li class="nav-item" onclick="showSection('cashflow')">
                         <span class="nav-icon">📈</span>
                         <span class="nav-text">Cashflow</span>
@@ -130,6 +134,101 @@
                             <div id="tf-status" class="status-message"></div>
                 </section>
 
+                <!-- Revenue Ops Section -->
+                <section id="rev-ops-section" class="content-section" style="display:none;">
+                    <div class="section-header">
+                        <h2>Revenue Ops Control Room</h2>
+                        <p class="subtitle">Accounts, opportunities, renewals, and overrides</p>
+                    </div>
+
+                    <div class="card-grid">
+                        <div class="card full-width-card">
+                            <div class="grid-2" style="align-items:center;">
+                                <div>
+                                    <h3>Portfolio Health</h3>
+                                    <p class="subtitle" style="margin:0;">Active accounts with status and recommended
+                                        action.</p>
+                                </div>
+                                <button class="btn-secondary" onclick="loadRevenueOps(true)">Refresh</button>
+                            </div>
+                            <div class="table-wrapper">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Account</th>
+                                            <th>Tier</th>
+                                            <th>Status</th>
+                                            <th>Action</th>
+                                            <th class="currency">SEO Rev (annual)</th>
+                                            <th class="currency">Tech Fee (annual)</th>
+                                            <th class="currency">Variance</th>
+                                            <th>Renewal</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="revops-accounts-body">
+                                        <tr>
+                                            <td colspan="8" class="text-muted">Loading…</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <h3>Renewals (≤ 90 days)</h3>
+                            <p class="subtitle" style="margin-bottom:8px;">From Renewal Radar / end dates</p>
+                            <div class="table-wrapper">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Account</th>
+                                            <th>Tier</th>
+                                            <th>Status</th>
+                                            <th>Action</th>
+                                            <th>Renewal</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="revops-renewals-body">
+                                        <tr>
+                                            <td colspan="5" class="text-muted">Loading…</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <h3>Opportunity Overrides</h3>
+                            <p class="subtitle" style="margin-bottom:8px;">Select an opportunity to adjust revenue or
+                                add a tech fee (auto subtracts from SEO revenue).</p>
+                            <div class="form-group">
+                                <label for="revops-op-select">Opportunity</label>
+                                <select id="revops-op-select" class="input-select"></select>
+                            </div>
+                            <div class="form-group">
+                                <label for="revops-new-revenue">Set Revenue (USD)</label>
+                                <input type="number" id="revops-new-revenue" class="input-select"
+                                    placeholder="e.g. 25000" />
+                            </div>
+                            <div class="form-group">
+                                <label for="revops-techfee-amount">Add Tech Fee (USD)</label>
+                                <input type="number" id="revops-techfee-amount" class="input-select"
+                                    placeholder="e.g. 12000" />
+                            </div>
+                            <div class="form-group">
+                                <label for="revops-reason">Reason</label>
+                                <input type="text" id="revops-reason" class="input-select"
+                                    placeholder="e.g. SOW adjustment" />
+                            </div>
+                            <div class="grid-2">
+                                <button class="btn-primary" onclick="saveRevenueOverride()">Save Revenue</button>
+                                <button class="btn-secondary" onclick="saveTechFeeOverride()">Add Tech Fee</button>
+                            </div>
+                            <div id="revops-status" class="status-message"></div>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- ENTITLEMENTS SECTION -->
                 <section id="entitlements-section" class="content-section">
                     <div class="section-header">
@@ -140,10 +239,14 @@
                     <div class="card-grid">
                         <div class="card">
                             <h3>Stack Economics</h3>
-                            <div class="stat-row"><span class="stat-label">Shared Stack Cost</span><span class="stat-value" id="ent-shared">$0.00</span></div>
-                            <div class="stat-row"><span class="stat-label">Client-Funded Cost</span><span class="stat-value" id="ent-dedicated">$0.00</span></div>
-                            <div class="stat-row"><span class="stat-label">Total Tool Revenue</span><span class="stat-value" id="ent-revenue">$0.00</span></div>
-                            <div class="stat-row"><span class="stat-label">Remaining Balance</span><span class="stat-value" id="ent-balance">$0.00</span></div>
+                            <div class="stat-row"><span class="stat-label">Shared Stack Cost</span><span
+                                    class="stat-value" id="ent-shared">$0.00</span></div>
+                            <div class="stat-row"><span class="stat-label">Client-Funded Cost</span><span
+                                    class="stat-value" id="ent-dedicated">$0.00</span></div>
+                            <div class="stat-row"><span class="stat-label">Total Tool Revenue</span><span
+                                    class="stat-value" id="ent-revenue">$0.00</span></div>
+                            <div class="stat-row"><span class="stat-label">Remaining Balance</span><span
+                                    class="stat-value" id="ent-balance">$0.00</span></div>
                         </div>
                         <div class="card">
                             <h3>Capacity vs Allocations</h3>
@@ -158,7 +261,9 @@
                                     </tr>
                                 </thead>
                                 <tbody id="ent-capacity-body">
-                                    <tr><td colspan="5" class="text-muted">Loading…</td></tr>
+                                    <tr>
+                                        <td colspan="5" class="text-muted">Loading…</td>
+                                    </tr>
                                 </tbody>
                             </table>
                         </div>
@@ -167,7 +272,8 @@
                     <div class="card full-width-card" style="margin-top:24px;">
                         <div class="section-header" style="margin-bottom:12px;">
                             <h3>Client Entitlements (2025)</h3>
-                            <p class="subtitle" style="margin:0;">Tiered SKU mapping from Strategic_Tech_Budget_Rate_Card_2025.md</p>
+                            <p class="subtitle" style="margin:0;">Tiered SKU mapping from
+                                Strategic_Tech_Budget_Rate_Card_2025.md</p>
                         </div>
                         <table class="data-table">
                             <thead>
@@ -184,7 +290,9 @@
                                 </tr>
                             </thead>
                             <tbody id="ent-table-body">
-                                <tr><td colspan="9" class="text-muted">Loading…</td></tr>
+                                <tr>
+                                    <td colspan="9" class="text-muted">Loading…</td>
+                                </tr>
                             </tbody>
                         </table>
                     </div>
@@ -207,7 +315,8 @@
                         <div class="section-header" style="margin-bottom:12px;">
                             <h3>Tool Revenue vs. Burn Rate &amp; Scenario Planning</h3>
                             <p class="subtitle" style="margin-bottom:8px;">
-                                Tool Revenue: <span id="range-revenue-total">$0.00</span> • Tool Cost: <span id="range-cost-total">$0.00</span>
+                                Tool Revenue: <span id="range-revenue-total">$0.00</span> • Tool Cost: <span
+                                    id="range-cost-total">$0.00</span>
                             </p>
                         </div>
                         <div class="grid-2">
@@ -226,11 +335,13 @@
                     <div class="card full-width-card" style="margin-bottom: 24px;">
                         <div class="section-header" style="margin-bottom:12px;">
                             <h3 id="month-detail-title">Month Detail</h3>
-                            <p class="subtitle" style="margin:0;">Click a bar/line point to view transactions and client revenue.</p>
+                            <p class="subtitle" style="margin:0;">Click a bar/line point to view transactions and client
+                                revenue.</p>
                         </div>
                         <div class="grid-2">
                             <div>
-                                <h4 class="detail-heading">Tool Transactions <span id="tx-total" class="detail-total"></span></h4>
+                                <h4 class="detail-heading">Tool Transactions <span id="tx-total"
+                                        class="detail-total"></span></h4>
                                 <table class="data-table">
                                     <thead>
                                         <tr>
@@ -242,23 +353,29 @@
                                         </tr>
                                     </thead>
                                     <tbody id="tx-table-body">
-                                        <tr><td colspan="5" class="text-muted">No transactions for this month.</td></tr>
+                                        <tr>
+                                            <td colspan="5" class="text-muted">No transactions for this month.</td>
+                                        </tr>
                                     </tbody>
                                 </table>
                             </div>
                             <div>
-                                <h4 class="detail-heading">Revenue - SEO <span id="client-seo-total" class="detail-total"></span> &amp; Tool <span id="client-tool-total" class="detail-total"></span></h4>
+                                <h4 class="detail-heading">Revenue - SEO <span id="client-seo-total"
+                                        class="detail-total"></span> &amp; Tool <span id="client-tool-total"
+                                        class="detail-total"></span></h4>
                                 <table class="data-table">
                                     <thead>
                                         <tr>
                                             <th>Account</th>
                                             <th>Market</th>
                                             <th class="currency">Tool Revenue</th>
-                                            <th class="currency">SEO Revenue</th>
+                                            <!-- <th class="currency">SEO Revenue</th> -->
                                         </tr>
                                     </thead>
                                     <tbody id="client-table-body">
-                                        <tr><td colspan="4" class="text-muted">No client revenue for this month.</td></tr>
+                                        <tr>
+                                            <td colspan="4" class="text-muted">No client revenue for this month.</td>
+                                        </tr>
                                     </tbody>
                                 </table>
                             </div>
@@ -359,11 +476,13 @@
                             </div>
                             <div class="form-group">
                                 <label>Unit</label>
-                                <input type="text" id="tool-unit" class="input-select" placeholder="Keywords / URLs / Seats" />
+                                <input type="text" id="tool-unit" class="input-select"
+                                    placeholder="Keywords / URLs / Seats" />
                             </div>
                             <div class="form-group">
                                 <label>Notes</label>
-                                <input type="text" id="tool-notes" class="input-select" placeholder="Enterprise license" />
+                                <input type="text" id="tool-notes" class="input-select"
+                                    placeholder="Enterprise license" />
                             </div>
                             <div class="grid-2">
                                 <button class="btn-secondary" onclick="runEnsureToolConfig()">Ensure Tab</button>
@@ -386,7 +505,9 @@
                                         </tr>
                                     </thead>
                                     <tbody id="tool-config-table-body">
-                                        <tr><td colspan="5" class="text-muted">Loading…</td></tr>
+                                        <tr>
+                                            <td colspan="5" class="text-muted">Loading…</td>
+                                        </tr>
                                     </tbody>
                                 </table>
                                 <div class="grid-2" style="margin-top:12px;">
@@ -411,7 +532,9 @@
                                         </tr>
                                     </thead>
                                     <tbody id="tier-config-table-body">
-                                        <tr><td colspan="6" class="text-muted">Loading…</td></tr>
+                                        <tr>
+                                            <td colspan="6" class="text-muted">Loading…</td>
+                                        </tr>
                                     </tbody>
                                 </table>
                                 <div class="grid-2" style="margin-top:12px;">

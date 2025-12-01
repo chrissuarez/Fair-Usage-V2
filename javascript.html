@@ -8,21 +8,17 @@
         document.getElementById(sectionId + '-section').style.display = 'block';
 
         // Update nav active state
-        document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-        // Simple logic to find the nav item (could be improved with IDs)
         const navItems = document.querySelectorAll('.nav-item');
-        if (sectionId === 'fair-usage') navItems[0].classList.add('active');
-        if (sectionId === 'tech-fee') navItems[1].classList.add('active');
-        if (sectionId === 'cashflow') {
-            navItems[2].classList.add('active');
-            loadCashflowData(); // Load data when tab is opened
-        }
+        navItems.forEach(el => el.classList.remove('active'));
+        const map = { 'fair-usage': 0, 'tech-fee': 1, 'rev-ops': 2, 'cashflow': 3, 'entitlements': 4, 'settings': 5 };
+        if (map.hasOwnProperty(sectionId) && navItems[map[sectionId]]) navItems[map[sectionId]].classList.add('active');
+
+        if (sectionId === 'rev-ops') loadRevenueOps();
+        if (sectionId === 'cashflow') loadCashflowData(); // Load data when tab is opened
         if (sectionId === 'entitlements') {
-            navItems[3].classList.add('active');
             loadEntitlements();
         }
         if (sectionId === 'settings') {
-            navItems[4].classList.add('active');
             loadToolConfig();
             loadTierConfig();
         }
@@ -134,6 +130,7 @@
     let entitlementsLoaded = false;
     let toolConfigLoaded = false;
     let tierConfigLoaded = false;
+    let revOpsData = null;
 
     function loadCashflowData() {
         if (baseData) return; // Already loaded
@@ -205,6 +202,173 @@
                 alert("Failed to load entitlements: " + err.message);
             })
             .getTechEntitlements_Web();
+    }
+
+    // --- REVENUE OPS ---
+    function loadRevenueOps(force) {
+        if (revOpsData && !force) return;
+        const statusEl = document.getElementById('revops-status');
+        if (statusEl) {
+            statusEl.textContent = 'Loading...';
+            statusEl.className = 'status-message status-loading';
+        }
+        google.script.run
+            .withSuccessHandler(function (data) {
+                revOpsData = data;
+                renderRevOps();
+                if (statusEl) {
+                    const acctCount = (data.accounts || []).length;
+                    const renCount = (data.renewals || []).length;
+                    const oppCount = (data.opportunities || []).length;
+                    const rows = data.debug && data.debug.rows !== undefined ? data.debug.rows : '';
+                    statusEl.textContent = `Loaded ${acctCount} accounts, ${renCount} renewals, ${oppCount} opportunities${rows !== '' ? ` (master rows: ${rows})` : ''}.`;
+                    statusEl.className = 'status-message status-success';
+                }
+            })
+            .withFailureHandler(function (err) {
+                if (statusEl) {
+                    statusEl.textContent = 'Error: ' + err.message;
+                    statusEl.className = 'status-message status-error';
+                } else {
+                    alert('Failed to load Revenue Ops: ' + err.message);
+                }
+            })
+            .getRevenueOpsDashboardData_Web();
+    }
+
+    function renderRevOps() {
+        if (!revOpsData) return;
+        renderRevOpsAccounts(revOpsData.accounts || []);
+        renderRevOpsRenewals(revOpsData.renewals || []);
+        populateOpportunitySelect(revOpsData.opportunities || []);
+    }
+
+    function renderRevOpsAccounts(accounts) {
+        const tbody = document.getElementById('revops-accounts-body');
+        if (!tbody) return;
+        if (!accounts.length) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-muted">No accounts found.</td></tr>';
+            return;
+        }
+        accounts.sort((a, b) => (b.seoAnnual || 0) - (a.seoAnnual || 0));
+        tbody.innerHTML = accounts.map(a => `
+            <tr>
+                <td>${escapeHtml(a.account)}</td>
+                <td>${escapeHtml(a.tier || '')}</td>
+                <td>${escapeHtml(a.status || '')}</td>
+                <td>${escapeHtml(a.plan || '')}</td>
+                <td class="currency">${formatCurrency(a.seoAnnual || 0)}</td>
+                <td class="currency">${formatCurrency(a.techAnnual || 0)}</td>
+                <td class="currency">${formatCurrency((a.variance != null) ? a.variance : ((a.targetFee || 0) - (a.actualFee || 0)))}</td>
+                <td>${a.earliestEnd ? formatDateShort(a.earliestEnd) : ''}</td>
+            </tr>
+        `).join('');
+    }
+
+    function renderRevOpsRenewals(renewals) {
+        const tbody = document.getElementById('revops-renewals-body');
+        if (!tbody) return;
+        if (!renewals.length) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-muted">No renewals in window.</td></tr>';
+            return;
+        }
+        renewals.sort((a, b) => new Date(a.renewal || 0) - new Date(b.renewal || 0));
+        tbody.innerHTML = renewals.map(r => `
+            <tr>
+                <td>${escapeHtml(r.account)}</td>
+                <td>${escapeHtml(r.tier || '')}</td>
+                <td>${escapeHtml(r.status || '')}</td>
+                <td>${escapeHtml(r.plan || '')}</td>
+                <td>${r.renewal ? formatDateShort(r.renewal) : ''}</td>
+            </tr>
+        `).join('');
+    }
+
+    function populateOpportunitySelect(opps) {
+        const sel = document.getElementById('revops-op-select');
+        if (!sel) return;
+        sel.innerHTML = '';
+        if (!opps.length) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.text = 'No opportunities found';
+            sel.appendChild(opt);
+            return;
+        }
+        opps.filter(o => !o.techFee).forEach(o => {
+            const opt = document.createElement('option');
+            opt.value = o.uid;
+            opt.text = `${o.account} — ${o.opportunity} (${o.capability})`;
+            opt.dataset.revenue = o.annual || 0;
+            sel.appendChild(opt);
+        });
+        if (sel.options.length > 0) {
+            const first = sel.options[0];
+            document.getElementById('revops-new-revenue').value = first.dataset.revenue || '';
+        }
+    }
+
+    function saveRevenueOverride() {
+        const sel = document.getElementById('revops-op-select');
+        const uid = sel.value;
+        const amount = parseFloat(document.getElementById('revops-new-revenue').value);
+        const reason = document.getElementById('revops-reason').value;
+        const statusEl = document.getElementById('revops-status');
+        if (!uid || isNaN(amount)) {
+            statusEl.textContent = 'Select an opportunity and enter a revenue amount.';
+            statusEl.className = 'status-message status-error';
+            return;
+        }
+        statusEl.textContent = 'Saving revenue...';
+        statusEl.className = 'status-message status-loading';
+        google.script.run
+            .withSuccessHandler(function (msg) {
+                statusEl.textContent = msg;
+                statusEl.className = 'status-message status-success';
+                revOpsData = null;
+                loadRevenueOps(true);
+                refreshCashflowBase();
+            })
+            .withFailureHandler(function (err) {
+                statusEl.textContent = 'Error: ' + err.message;
+                statusEl.className = 'status-message status-error';
+            })
+            .updateOpportunityRevenue_Web({ uid, amount, reason });
+    }
+
+    function saveTechFeeOverride() {
+        const sel = document.getElementById('revops-op-select');
+        const uid = sel.value;
+        const amount = parseFloat(document.getElementById('revops-techfee-amount').value);
+        const reason = document.getElementById('revops-reason').value;
+        const statusEl = document.getElementById('revops-status');
+        if (!uid || isNaN(amount)) {
+            statusEl.textContent = 'Select an opportunity and enter a tech fee amount.';
+            statusEl.className = 'status-message status-error';
+            return;
+        }
+        statusEl.textContent = 'Adding tech fee...';
+        statusEl.className = 'status-message status-loading';
+        google.script.run
+            .withSuccessHandler(function (msg) {
+                statusEl.textContent = msg;
+                statusEl.className = 'status-message status-success';
+                revOpsData = null;
+                loadRevenueOps(true);
+                refreshCashflowBase();
+            })
+            .withFailureHandler(function (err) {
+                statusEl.textContent = 'Error: ' + err.message;
+                statusEl.className = 'status-message status-error';
+            })
+            .addTechFeeForOpportunity_Web({ uid, amount, reason });
+    }
+
+    function refreshCashflowBase() {
+        baseData = null;
+        if (document.getElementById('cashflow-section') && document.getElementById('cashflow-section').style.display !== 'none') {
+            loadCashflowData();
+        }
     }
 
     function initRangeInputs() {
@@ -497,7 +661,7 @@
         const clientsRaw = (baseData.clientRevenue && baseData.clientRevenue[idx]) || [];
         if (!clientsRaw.length) {
             clientBody.innerHTML = '<tr><td colspan="4" class="text-muted">No client revenue for this month.</td></tr>';
-            clientSeoTotalEl.textContent = '(SEO: $0.00)';
+            clientSeoTotalEl.textContent = ''; // Hide SEO total
             clientToolTotalEl.textContent = '(Tool: $0.00)';
         } else {
             // aggregate by account name (case-insensitive)
@@ -517,14 +681,14 @@
             rows.sort((a, b) => (b.tool || 0) - (a.tool || 0));
             const seoTotal = rows.reduce((sum, r) => sum + (Number(r.seo) || 0), 0);
             const toolTotal = rows.reduce((sum, r) => sum + (Number(r.tool) || 0), 0);
-            clientSeoTotalEl.textContent = `(SEO: ${formatCurrency(seoTotal)})`;
+            clientSeoTotalEl.textContent = ''; // Hide SEO total
             clientToolTotalEl.textContent = `(Tool: ${formatCurrency(toolTotal)})`;
             clientBody.innerHTML = rows.map(c => `
                 <tr>
                     <td>${escapeHtml(c.client || '')}</td>
                     <td>${escapeHtml(c.market || '')}</td>
                     <td class="currency">${formatCurrency(c.tool || 0)}</td>
-                    <td class="currency">${formatCurrency(c.seo || 0)}</td>
+                    <!-- <td class="currency">${formatCurrency(c.seo || 0)}</td> -->
                 </tr>
             `).join('');
         }
@@ -550,6 +714,12 @@
     function formatNumber(n) {
         const num = Number(n) || 0;
         return num.toLocaleString();
+    }
+
+    function formatDateShort(d) {
+        const date = d instanceof Date ? d : new Date(d);
+        if (isNaN(date)) return '';
+        return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
     }
 
     // --- TOOL CONFIG MANAGEMENT ---

@@ -13,6 +13,10 @@ function onOpen() {
     .addItem('Generate Tool Cost Timeline', 'buildToolCostTimeline')
     .addSeparator()
     .addItem('Create Tool Transactions Tab', 'ensureToolTransactionsTab')
+    .addSeparator()
+    .addItem('Create Revenue Ops Shadow Tables', 'EnsureRevenueOpsShadowTables')
+    .addItem('Setup Revenue Ops Config Tabs', 'ensureRevenueOpsConfigTabs')
+    .addItem('Refresh Revenue Ops Pipeline', 'refreshRevenueOpsPipeline')
     .addToUi();
 }
 

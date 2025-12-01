@@ -9,6 +9,9 @@ function onOpen() {
     .addItem('Build Tech Fee Join', 'Build_Tech_Fee_Join')
     .addItem('Refresh Fair-Usage Table', 'Build_FairUsage_ForYear')
     .addItem('Create/Update Setup Tab', 'EnsureSetupTab_')
+    .addItem('Create Revenue Ops Shadow Tables', 'EnsureRevenueOpsShadowTables')
+    .addItem('Refresh Revenue Ops Pipeline', 'refreshRevenueOpsPipeline')
+    .addItem('Setup Revenue Ops Config Tabs', 'ensureRevenueOpsConfigTabs')
     .addToUi();
 
   ui
@@ -1024,37 +1027,51 @@ function EnsureExpensesTab_() {
  *************************/
 function getCashflowData() {
   const ss = SpreadsheetApp.getActive();
-  const SHEET_NAME = "Tech Cashflow Forecast 2025-26";
+  const MASTER = "MASTER_Ledger";
   const TOOL_TX_SHEET = "Tool Transactions";
-  const SEO_SHEET = "SEO Client Revenue";
-  const sh = ss.getSheetByName(SHEET_NAME);
-  
+  const sh = ss.getSheetByName(MASTER);
   if (!sh) {
-    throw new Error(`Sheet "${SHEET_NAME}" not found. Please run "Generate Tech Run Rate" first.`);
+    throw new Error(`Sheet "${MASTER}" not found. Run "Refresh Revenue Ops Pipeline" first.`);
   }
 
   const data = sh.getDataRange().getValues();
-  const headers = data[0];
-  
-  // Find month columns (starting from col 6, index 6)
-  const monthStartIndex = 6;
-  const months = headers.slice(monthStartIndex).map(d => {
-    return Utilities.formatDate(new Date(d), Session.getScriptTimeZone(), "MMM-yy");
-  });
-  const monthDates = headers.slice(monthStartIndex).map(d => new Date(d));
-  const monthKeys = monthDates.map(d => Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM"));
+  const headers = data.shift();
 
-  // Calculate Total Revenue per Month
-  const revenue = new Array(months.length).fill(0);
-  for (let i = 1; i < data.length; i++) {
-    const row = data[i];
+  // MASTER_Ledger columns: 0:UID,1:Account,2:Opp Name,3:Capability,4:Start,5:End,6:Total_USD,7:Tech_Fee_Paying?, months start at col 8 (index 8)
+  const monthStartIndex = 8;
+  const monthKeys = headers.slice(monthStartIndex).map(k => safeStr_(k));
+  const monthDates = monthKeys.map(k => {
+    const parts = k.split("-");
+    if (parts.length === 2) return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1);
+    const d = new Date(k);
+    return isNaN(d) ? new Date() : d;
+  });
+  const months = monthDates.map(d => Utilities.formatDate(d, Session.getScriptTimeZone(), "MMM-yy"));
+
+  const revenue = new Array(months.length).fill(0); // tech fee revenue
+  const clientRevenue = months.map(() => []);
+
+  // Loop master ledger rows
+  data.forEach(row => {
+    const account = safeStr_(row[1]);
+    const capability = safeStr_(row[3]).toLowerCase();
+    const isTech = capability.indexOf('tech fee') !== -1 || capability.indexOf('tech & tools') !== -1 || capability.indexOf('tech') !== -1 || capability.indexOf('tool') !== -1;
     for (let m = 0; m < months.length; m++) {
-      const val = row[monthStartIndex + m];
-      if (typeof val === 'number') {
-        revenue[m] += val;
+      const val = toNumber_(row[monthStartIndex + m]);
+      if (!val) continue;
+      if (isTech) revenue[m] += val;
+      const seoVal = isTech ? 0 : val;
+      const techVal = isTech ? val : 0;
+      if (seoVal || techVal) {
+        clientRevenue[m].push({
+          client: account,
+          market: "",
+          toolRevenue: techVal,
+          seoRevenue: seoVal
+        });
       }
     }
-  }
+  });
 
   // Calculate Costs from "Tool Expenses"
   const costs = new Array(months.length).fill(0);
@@ -1087,51 +1104,6 @@ function getCashflowData() {
             notes: notes || ""
           });
         }
-      });
-    }
-  }
-
-  // Load SEO revenue (yearly -> monthly) for client breakdown
-  const SEO_YEAR_COLS = { 2024: 3, 2025: 4, 2026: 5 };
-  const seoSh = ss.getSheetByName(SEO_SHEET);
-  const seoMonthlyByAccount = new Map();
-  if (seoSh) {
-    const seoLast = getLastRow_(seoSh, 1, 2);
-    if (seoLast >= 2) {
-      const seoData = seoSh.getRange(2, 1, seoLast - 1 + 1, 5).getValues(); // up to col 5 to cover 2026
-      seoData.forEach(row => {
-        const acc = safeStr_(row[0]);
-        if (!acc) return;
-        const accKey = acc.toLowerCase();
-        const yearMap = {};
-        [2024, 2025, 2026].forEach(yr => {
-          const colIdx = SEO_YEAR_COLS[yr] - 1;
-          const annual = toNumber_(row[colIdx]);
-          if (annual > 0) yearMap[yr] = annual / 12;
-        });
-        seoMonthlyByAccount.set(accKey, yearMap);
-      });
-    }
-  }
-
-  // Client-level monthly contributions from the forecast sheet
-  const clientRevenue = months.map(() => []);
-  for (let i = 1; i < data.length; i++) {
-    const row = data[i];
-    const client = safeStr_(row[0]);
-    const market = safeStr_(row[1]);
-    const accKey = client.toLowerCase();
-    for (let m = 0; m < months.length; m++) {
-      const val = toNumber_(row[monthStartIndex + m]);
-      if (!val) continue;
-      const yr = monthDates[m].getFullYear();
-      const seoMap = seoMonthlyByAccount.get(accKey) || {};
-      const seoMonthly = seoMap[yr] || 0;
-      clientRevenue[m].push({
-        client: client,
-        market: market,
-        toolRevenue: val,
-        seoRevenue: seoMonthly
       });
     }
   }
