@@ -518,8 +518,20 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
       oppName = safeStr_(get(fm.opportunity));
       const estId = safeStr_(get(fm.estimateId));
       uid = estId || generateOpportunityUid_(account, oppName);
-      startDate = parseDate_(get(fm.startDate));
-      endDate = parseDate_(get(fm.endDate));
+      
+      // 1. Try Project Lookup (by Opportunity Name)
+      if (projectLookup && projectLookup[oppName]) {
+        startDate = projectLookup[oppName].start;
+        endDate = projectLookup[oppName].end;
+        debugInfo.push(`Dates from Project: ${projectLookup[oppName].name}`);
+      }
+
+      // 2. Fallback to Estimate columns
+      if (!startDate) {
+        startDate = parseDate_(get(fm.startDate));
+        endDate = parseDate_(get(fm.endDate));
+      }
+      
       currency = safeStr_(get(fm.currency)) || 'USD';
       const hours = toNumber_(get(fm.hours));
       const billRate = toNumber_(get(fm.billRate));
@@ -564,7 +576,7 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
       }
       
       currency = safeStr_(get(fm.currency)) || 'USD';
-      totalAmount = toNumber_(get(fm.productAmount));
+      totalAmount = parseCurrency_(get(fm.productAmount));
       capability = safeStr_(get(fm.productName)) || 'Tech Fee';
       
       const stage = safeStr_(get(fm.stage)).trim().toLowerCase();
@@ -1012,4 +1024,14 @@ function generateClientActionPlan(client) {
     return { status: '🟢 HEALTHY', plan: 'No action needed. Client fully funds their tier.' };
   }
   return { status: '🟠 GAP IDENTIFIED', plan: 'Tech fee below target. Review SOW and propose glide path.' };
+}
+
+function parseCurrency_(value) {
+  if (typeof value === 'number') return value;
+  if (!value) return 0;
+  const str = String(value);
+  // Remove everything that is not a digit, dot, or minus
+  const clean = str.replace(/[^0-9.-]+/g, '');
+  const n = parseFloat(clean);
+  return isFinite(n) ? n : 0;
 }
