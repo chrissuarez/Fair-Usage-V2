@@ -326,8 +326,9 @@ function refreshRevenueOpsPipeline() {
       const name = safeStr_(r[hMap[fm.project]]);
       const opp = safeStr_(r[hMap[fm.opportunity]]);
       
-      // Filter: Ignore "OPP_" projects
+      // Filter: Ignore "OPP_" projects AND "Client Admin & Expense Centre"
       if (name.toUpperCase().startsWith('OPP_')) return;
+      if (name.indexOf('Client Admin & Expense Centre') !== -1) return;
 
       // Key by Opportunity Name
       if (opp && start && end) {
@@ -513,6 +514,10 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
     let totalAmount = 0;
     let capability = '';
     let techFeePaying = false;
+    let role = '';
+    let region = '';
+    let hours = 0;
+    let billRate = 0;
     let debugInfo = [];
 
     if (cfg === SOURCE_CONFIG.Estimate) {
@@ -536,8 +541,10 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
       }
       
       currency = safeStr_(get(fm.currency)) || 'USD';
-      const hours = toNumber_(get(fm.hours));
-      const billRate = toNumber_(get(fm.billRate));
+      hours = toNumber_(get(fm.hours));
+      billRate = toNumber_(get(fm.billRate));
+      role = safeStr_(get(fm.role));
+      region = safeStr_(get(fm.region));
       totalAmount = hours * billRate;
       capability = categorizeRevenue(get(fm.role));
       techFeePaying = false;
@@ -616,6 +623,10 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
       Account: account,
       Opportunity_Name: oppName,
       Capability: capability || (cfg.amountField === 'Revenue' ? 'Other/Shared' : 'Tech Fee'),
+      Role: role,
+      Region: region,
+      Hours: hours,
+      Bill_Rate: billRate,
       Start_Date: startDate,
       End_Date: endDate,
       Total_USD: totalUsd,
@@ -641,7 +652,7 @@ function buildCombinedLedger_(estimate, tech) {
   const sh = getOrCreateSheet_(ss, 'MASTER_Ledger');
 
   const months = mergeMonths_(estimate.months, tech.months);
-  const header = ['Opportunity_UID', 'Account', 'Opportunity Name', 'Capability', 'Start Date', 'End Date', 'Total_USD', 'Tech_Fee_Paying?'].concat(months);
+  const header = ['Opportunity_UID', 'Account', 'Opportunity Name', 'Capability', 'Resource Role', 'Resource Region', 'Hours', 'Bill Rate', 'Start Date', 'End Date', 'Total_USD', 'Tech_Fee_Paying?'].concat(months);
 
   const rows = [];
   estimate.rows.forEach(r => {
@@ -913,7 +924,7 @@ function categorizeRevenue(roleString) {
 }
 
 function writeMasterSheet_(sheet, rows, months, amountField) {
-  const header = ['Opportunity_UID', 'Account', 'Opportunity Name', 'Capability', 'Start Date', 'End Date', 'Total_USD', 'Tech_Fee_Paying?'].concat(months);
+  const header = ['Opportunity_UID', 'Account', 'Opportunity Name', 'Capability', 'Resource Role', 'Resource Region', 'Hours', 'Bill Rate', 'Start Date', 'End Date', 'Total_USD', 'Tech_Fee_Paying?'].concat(months);
   sheet.clearContents();
   if (rows.length === 0) {
     sheet.getRange(1, 1, 1, header.length).setValues([header]).setFontWeight('bold');
@@ -932,6 +943,10 @@ function rowToArray_(row, months) {
     row.Account,
     row.Opportunity_Name,
     row.Capability,
+    row.Role,
+    row.Region,
+    row.Hours,
+    row.Bill_Rate,
     row.Start_Date,
     row.End_Date,
     row.Total_USD,
