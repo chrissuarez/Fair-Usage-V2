@@ -494,15 +494,58 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
   const ovSh = ss.getSheetByName(cfg.overrideSheet);
   const masterSh = ss.getSheetByName(cfg.masterSheet);
   if (!rawSh || !ovSh || !masterSh) throw new Error(`Missing shadow table for ${cfg.rawSheet}`);
-
+    
   const headers = rawSh.getRange(1, 1, 1, rawSh.getLastColumn()).getDisplayValues()[0];
-  const rawRows = rawSh.getLastRow() > 1 ? rawSh.getRange(2, 1, rawSh.getLastRow() - 1, headers.length).getValues() : [];
+  const rawRows = rawSh.getLastRow() > 1 ? 
+    rawSh.getRange(2, 1, rawSh.getLastRow() - 1, headers.length).getValues() : [];
   const overrides = readOverrides_(ovSh);
 
   const monthsSet = new Set();
   const masterRows = [];
-  const headerMap = headers.reduce((acc, h, idx) => { acc[h] = idx; return acc; }, {});
+  const headerMap = headers.reduce((acc, h, idx) => { acc[h.trim()] = idx; return acc; }, {});
 
+  // --- PASS 1: Calculate Scaling Factors ---
+  const scalingFactors = {}; 
+    
+  if (cfg === SOURCE_CONFIG.Estimate) {
+    const fm = cfg.fieldMap;
+    const oppTotals = {}; // { "Account::OppName": 700000 }
+    const groupUids = {}; // { "Account::OppName": "aCXRN..." }
+      
+    // Sum up the raw amounts per Opportunity Group
+    rawRows.forEach(raw => {
+      const acc = safeStr_(raw[headerMap[fm.account]]);
+      const opp = safeStr_(raw[headerMap[fm.opportunity]]);
+      const key = `${acc}::${opp}`; 
+        
+      const hours = toNumber_(raw[headerMap[fm.hours]]);
+      const rate = toNumber_(raw[headerMap[fm.billRate]]);
+      
+      // Capture Estimate ID for the group if available
+      const estId = safeStr_(raw[headerMap[fm.estimateId]]);
+      if (estId) groupUids[key] = estId;
+        
+      if (!oppTotals[key]) oppTotals[key] = 0;
+      oppTotals[key] += (hours * rate);
+    });
+
+    // Check for "Target_Revenue" overrides
+    Object.keys(oppTotals).forEach(key => {
+      const parts = key.split('::');
+      // Use captured Estimate ID if available, otherwise fallback to hash
+      const groupUid = groupUids[key] || generateOpportunityUid_(parts[0], parts[1]); 
+      const rawTotal = oppTotals[key];
+
+      if (overrides[groupUid] && overrides[groupUid]['target_revenue']) {
+         const target = Number(overrides[groupUid]['target_revenue']);
+         if (!isNaN(target) && rawTotal > 0) {
+           scalingFactors[key] = target / rawTotal; 
+         }
+      }
+    });
+  }
+
+  // --- PASS 2: Generate Rows ---
   rawRows.forEach(raw => {
     const get = name => raw[headerMap[name]];
     let uid = '';
@@ -514,65 +557,75 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
     let totalAmount = 0;
     let capability = '';
     let techFeePaying = false;
+    let debugInfo = [];
+      
+    // New Fields
     let role = '';
     let region = '';
     let hours = 0;
     let billRate = 0;
-    let debugInfo = [];
 
     if (cfg === SOURCE_CONFIG.Estimate) {
       const fm = cfg.fieldMap;
+    
       account = safeStr_(get(fm.account));
       oppName = safeStr_(get(fm.opportunity));
       const estId = safeStr_(get(fm.estimateId));
       uid = estId || generateOpportunityUid_(account, oppName);
-      
-      // 1. Try Project Lookup (by Opportunity Name)
+        
+      // Extract new columns
+      role = safeStr_(get(fm.role));
+      region = safeStr_(get(fm.region));
+      hours = toNumber_(get(fm.hours));
+      billRate = toNumber_(get(fm.billRate));
+
+      // Project Lookup & Dates Logic
       if (projectLookup && projectLookup[oppName]) {
         startDate = projectLookup[oppName].start;
         endDate = projectLookup[oppName].end;
         debugInfo.push(`Dates from Project: ${projectLookup[oppName].name}`);
       }
-
-      // 2. Fallback to Estimate columns
       if (!startDate) {
         startDate = parseDate_(get(fm.startDate));
         endDate = parseDate_(get(fm.endDate));
       }
-      
+        
       currency = safeStr_(get(fm.currency)) || 'USD';
-      hours = toNumber_(get(fm.hours));
-      billRate = toNumber_(get(fm.billRate));
-      role = safeStr_(get(fm.role));
-      region = safeStr_(get(fm.region));
-      totalAmount = hours * billRate;
+        
+      let rawLineAmount = hours * billRate;
+
+      // Apply Scaling Factor
+      const groupKey = `${account}::${oppName}`;
+      if (scalingFactors[groupKey]) {
+        const factor = scalingFactors[groupKey];
+        rawLineAmount = rawLineAmount * factor;
+        debugInfo.push(`Scaled by ${(factor*100).toFixed(1)}%`);
+      }
+
+      totalAmount = rawLineAmount;
       capability = categorizeRevenue(get(fm.role));
       techFeePaying = false;
+
     } else {
+      // Tech Fee Logic
       const fm = cfg.fieldMap;
       uid = safeStr_(get(fm.opportunityUid)) || generateOpportunityUid_(safeStr_(get(fm.account)), safeStr_(get(fm.opportunity)));
       account = safeStr_(get(fm.account));
       oppName = safeStr_(get(fm.opportunity));
-      
-      // 1. Try Project Lookup (by Opportunity Name)
+        
       if (projectLookup && projectLookup[oppName]) {
         startDate = projectLookup[oppName].start;
         endDate = projectLookup[oppName].end;
         debugInfo.push(`Dates from Project: ${projectLookup[oppName].name}`);
       }
-      
-      // 2. Try Opportunity Lookup (by Name) - Fallback to Estimate dates if no Project match
       if (!startDate && dateLookup && dateLookup[oppName]) {
         startDate = dateLookup[oppName].start;
         endDate = dateLookup[oppName].end;
         debugInfo.push('Dates from Estimate Opp');
       }
-
-      // 3. Fallback to Close Date + 1 Year
       if (!startDate) {
         if (fm.startDate) startDate = parseDate_(get(fm.startDate));
         if (!startDate && fm.closeDate) startDate = parseDate_(get(fm.closeDate));
-        
         if (startDate) {
            if (fm.endDate) endDate = parseDate_(get(fm.endDate));
            if (!endDate) {
@@ -584,14 +637,11 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
            }
         }
       }
-      
       currency = safeStr_(get(fm.currency)) || 'USD';
       totalAmount = parseCurrency_(get(fm.productAmount));
       capability = safeStr_(get(fm.productName)) || 'Tech Fee';
-      
+      techFeePaying = true;
       const stage = safeStr_(get(fm.stage)).trim().toLowerCase();
-      // User request: All Tech Fee rows are paying
-      techFeePaying = true; 
       if (!techFeePaying) debugInfo.push(`Not Paying: Stage="${stage}", Amt=${totalAmount}`);
     }
 
@@ -613,7 +663,6 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
 
     const rate = globalCfg.currencyMap[currency] || 1;
     const totalUsd = totalAmount * rate;
-
     const monthlyMode = (globalCfg.params.partialMode || 'SIMPLE').toUpperCase();
     const monthly = calculateMonthlyRevenue(totalUsd, startDate, endDate, monthlyMode);
     Object.keys(monthly).forEach(k => monthsSet.add(k));
@@ -623,10 +672,10 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
       Account: account,
       Opportunity_Name: oppName,
       Capability: capability || (cfg.amountField === 'Revenue' ? 'Other/Shared' : 'Tech Fee'),
-      Role: role,
-      Region: region,
-      Hours: hours,
-      Bill_Rate: billRate,
+      Resource_Role: role,     // NEW
+      Resource_Region: region, // NEW
+      Hours: hours,            // NEW
+      Bill_Rate: billRate,     // NEW
       Start_Date: startDate,
       End_Date: endDate,
       Total_USD: totalUsd,
@@ -924,17 +973,52 @@ function categorizeRevenue(roleString) {
 }
 
 function writeMasterSheet_(sheet, rows, months, amountField) {
-  const header = ['Opportunity_UID', 'Account', 'Opportunity Name', 'Capability', 'Resource Role', 'Resource Region', 'Hours', 'Bill Rate', 'Start Date', 'End Date', 'Total_USD', 'Tech_Fee_Paying?'].concat(months);
+  // Updated Header Layout
+  const header = [
+    'Opportunity_UID', 
+    'Account', 
+    'Opportunity Name', 
+    'Capability', 
+    'Resource Role',    // NEW
+    'Resource Region',  // NEW
+    'Hours',            // NEW
+    'Bill Rate',        // NEW
+    'Start Date', 
+    'End Date', 
+    'Total_USD', 
+    'Tech_Fee_Paying?'
+  ].concat(months);
+
   sheet.clearContents();
   if (rows.length === 0) {
     sheet.getRange(1, 1, 1, header.length).setValues([header]).setFontWeight('bold');
     return;
   }
-  const values = rows.map(r => rowToArray_(r, months));
+    
+  const values = rows.map(r => {
+    const base = [
+      r.Opportunity_UID,
+      r.Account,
+      r.Opportunity_Name,
+      r.Capability,
+      r.Resource_Role,    // NEW
+      r.Resource_Region,  // NEW
+      r.Hours,            // NEW
+      r.Bill_Rate,        // NEW
+      r.Start_Date,
+      r.End_Date,
+      r.Total_USD,
+      r.Tech_Fee_Paying ? 'Yes' : 'No'
+    ];
+    months.forEach(m => base.push(r.Monthly[m] || 0));
+    return base;
+  });
+
   sheet.getRange(1, 1, values.length + 1, header.length).setValues([header].concat(values));
   sheet.getRange(1, 1, 1, header.length).setFontWeight('bold');
   sheet.setFrozenRows(1);
-  for (let c = 1; c <= header.length; c++) sheet.autoResizeColumn(c);
+  // Optional: Auto-resize might be slow for many columns, consider commenting out if slow
+  // for (let c = 1; c <= header.length; c++) sheet.autoResizeColumn(c);
 }
 
 function rowToArray_(row, months) {

@@ -10,13 +10,15 @@ Please modify the rebuildMasterForSource\_ function in TechRevenueOps.gs. You ne
    * Sum the raw revenue (Hours \* Bill Rate) for every Opportunity Group (grouped by Account \+ Opportunity Name).  
    * Check the overrides object. If there is an override for the Group UID with the field Target\_Revenue (case-insensitive), calculate a **Scaling Factor** (Override Target / Raw Total).  
    * Store this factor in a map: scalingFactors\[groupKey\] \= factor.  
-2. **Pass 2 (Generate Rows):**  
-   * In the main loop where masterRows are created, check if a Scaling Factor exists for the current row's Account+Opportunity.  
-   * If it exists, multiply the calculated rawLineAmount (Hours \* Rate) by the Scaling Factor *before* it is assigned to totalAmount.  
-   * Add a note to the Debug\_Info array: "Scaled by \[X\]%" so I can verify it.
+2. **Pass 2 (Generate Rows & Map New Columns):**  
+   * Extract the new columns: Resource Role, Pricing Region (as Region), Hours, and Bill Rate.  
+   * Apply the Scaling Factor to the revenue calculation if it exists.  
+   * Pass these new fields into the masterRows object so they can be printed.  
+3. **Update Column Headers:**  
+   * Update the writeMasterSheet\_ function to use the specific column order: Opportunity\_UID, Account, Opportunity Name, Capability, Resource Role, Resource Region, Hours, Bill Rate, Start Date, End Date, Total\_USD, Tech\_Fee\_Paying?, followed by the months.
 
 Specific Code Implementation:  
-Here is the logic I want you to integrate. Please replace the existing rebuildMasterForSource\_ function with this updated version that includes the pre-calculation logic:  
+Please replace the rebuildMasterForSource\_ and writeMasterSheet\_ functions with this code:  
 function rebuildMasterForSource\_(cfg, globalCfg, dateLookup, projectLookup) {  
   const ss \= SpreadsheetApp.getActive();  
   const rawSh \= ss.getSheetByName(cfg.rawSheet);  
@@ -33,14 +35,14 @@ function rebuildMasterForSource\_(cfg, globalCfg, dateLookup, projectLookup) {
   const masterRows \= \[\];  
   const headerMap \= headers.reduce((acc, h, idx) \=\> { acc\[h\] \= idx; return acc; }, {});
 
-  // \--- NEW LOGIC: PASS 1 (Calculate Scaling Factors) \---  
+  // \--- PASS 1: Calculate Scaling Factors \---  
   const scalingFactors \= {};   
     
   if (cfg \=== SOURCE\_CONFIG.Estimate) {  
     const fm \= cfg.fieldMap;  
     const oppTotals \= {}; // { "Account::OppName": 700000 }  
       
-    // 1\. Sum up the raw amounts per Opportunity Group  
+    // Sum up the raw amounts per Opportunity Group  
     rawRows.forEach(raw \=\> {  
       const acc \= safeStr\_(raw\[headerMap\[fm.account\]\]);  
       const opp \= safeStr\_(raw\[headerMap\[fm.opportunity\]\]);  
@@ -53,13 +55,12 @@ function rebuildMasterForSource\_(cfg, globalCfg, dateLookup, projectLookup) {
       oppTotals\[key\] \+= (hours \* rate);  
     });
 
-    // 2\. Check for "Target\_Revenue" overrides  
+    // Check for "Target\_Revenue" overrides  
     Object.keys(oppTotals).forEach(key \=\> {  
       const parts \= key.split('::');  
       const groupUid \= generateOpportunityUid\_(parts\[0\], parts\[1\]);   
       const rawTotal \= oppTotals\[key\];
 
-      // Check for Target\_Revenue override on the Group UID  
       if (overrides\[groupUid\] && overrides\[groupUid\]\['target\_revenue'\]) {  
          const target \= Number(overrides\[groupUid\]\['target\_revenue'\]);  
          if (\!isNaN(target) && rawTotal \> 0\) {  
@@ -67,9 +68,9 @@ function rebuildMasterForSource\_(cfg, globalCfg, dateLookup, projectLookup) {
          }  
       }  
     });  
-  }  
-  // \--- END NEW LOGIC \---
+  }
 
+  // \--- PASS 2: Generate Rows \---  
   rawRows.forEach(raw \=\> {  
     const get \= name \=\> raw\[headerMap\[name\]\];  
     let uid \= '';  
@@ -81,7 +82,13 @@ function rebuildMasterForSource\_(cfg, globalCfg, dateLookup, projectLookup) {
     let totalAmount \= 0;  
     let capability \= '';  
     let techFeePaying \= false;  
-    let debugInfo \= \[\];
+    let debugInfo \= \[\];  
+      
+    // New Fields  
+    let role \= '';  
+    let region \= '';  
+    let hours \= 0;  
+    let billRate \= 0;
 
     if (cfg \=== SOURCE\_CONFIG.Estimate) {  
       const fm \= cfg.fieldMap;  
@@ -91,6 +98,12 @@ function rebuildMasterForSource\_(cfg, globalCfg, dateLookup, projectLookup) {
       const estId \= safeStr\_(get(fm.estimateId));  
       uid \= estId || generateOpportunityUid\_(account, oppName);  
         
+      // Extract new columns  
+      role \= safeStr\_(get(fm.role));  
+      region \= safeStr\_(get(fm.region));  
+      hours \= toNumber\_(get(fm.hours));  
+      billRate \= toNumber\_(get(fm.billRate));
+
       // Project Lookup & Dates Logic  
       if (projectLookup && projectLookup\[oppName\]) {  
         startDate \= projectLookup\[oppName\].start;  
@@ -104,26 +117,22 @@ function rebuildMasterForSource\_(cfg, globalCfg, dateLookup, projectLookup) {
         
       currency \= safeStr\_(get(fm.currency)) || 'USD';  
         
-      // Calculate RAW Amount  
-      const hours \= toNumber\_(get(fm.hours));  
-      const billRate \= toNumber\_(get(fm.billRate));  
       let rawLineAmount \= hours \* billRate;
 
-      // \--- NEW LOGIC: Apply Scaling Factor \---  
+      // Apply Scaling Factor  
       const groupKey \= \`${account}::${oppName}\`;  
       if (scalingFactors\[groupKey\]) {  
         const factor \= scalingFactors\[groupKey\];  
         rawLineAmount \= rawLineAmount \* factor;  
         debugInfo.push(\`Scaled by ${(factor\*100).toFixed(1)}%\`);  
-      }  
-      // \---------------------------------------
+      }
 
       totalAmount \= rawLineAmount;  
       capability \= categorizeRevenue(get(fm.role));  
       techFeePaying \= false;
 
     } else {  
-      // Tech Fee Logic (Unchanged)  
+      // Tech Fee Logic  
       const fm \= cfg.fieldMap;  
       uid \= safeStr\_(get(fm.opportunityUid)) || generateOpportunityUid\_(safeStr\_(get(fm.account)), safeStr\_(get(fm.opportunity)));  
       account \= safeStr\_(get(fm.account));  
@@ -161,7 +170,6 @@ function rebuildMasterForSource\_(cfg, globalCfg, dateLookup, projectLookup) {
       if (\!techFeePaying) debugInfo.push(\`Not Paying: Stage="${stage}", Amt=${totalAmount}\`);  
     }
 
-    // Existing Override logic (Specific Row Overrides take precedence over scaling)  
     const applied \= applyOverridesToRow\_(  
       {  
         Opportunity\_UID: uid,  
@@ -189,6 +197,10 @@ function rebuildMasterForSource\_(cfg, globalCfg, dateLookup, projectLookup) {
       Account: account,  
       Opportunity\_Name: oppName,  
       Capability: capability || (cfg.amountField \=== 'Revenue' ? 'Other/Shared' : 'Tech Fee'),  
+      Resource\_Role: role,     // NEW  
+      Resource\_Region: region, // NEW  
+      Hours: hours,            // NEW  
+      Bill\_Rate: billRate,     // NEW  
       Start\_Date: startDate,  
       End\_Date: endDate,  
       Total\_USD: totalUsd,  
@@ -204,4 +216,53 @@ function rebuildMasterForSource\_(cfg, globalCfg, dateLookup, projectLookup) {
   writeMasterSheet\_(masterSh, masterRows, months, cfg.amountField);
 
   return { rows: masterRows, months };  
+}
+
+function writeMasterSheet\_(sheet, rows, months, amountField) {  
+  // Updated Header Layout  
+  const header \= \[  
+    'Opportunity\_UID',   
+    'Account',   
+    'Opportunity Name',   
+    'Capability',   
+    'Resource Role',    // NEW  
+    'Resource Region',  // NEW  
+    'Hours',            // NEW  
+    'Bill Rate',        // NEW  
+    'Start Date',   
+    'End Date',   
+    'Total\_USD',   
+    'Tech\_Fee\_Paying?'  
+  \].concat(months);
+
+  sheet.clearContents();  
+  if (rows.length \=== 0\) {  
+    sheet.getRange(1, 1, 1, header.length).setValues(\[header\]).setFontWeight('bold');  
+    return;  
+  }  
+    
+  const values \= rows.map(r \=\> {  
+    const base \= \[  
+      r.Opportunity\_UID,  
+      r.Account,  
+      r.Opportunity\_Name,  
+      r.Capability,  
+      r.Resource\_Role,    // NEW  
+      r.Resource\_Region,  // NEW  
+      r.Hours,            // NEW  
+      r.Bill\_Rate,        // NEW  
+      r.Start\_Date,  
+      r.End\_Date,  
+      r.Total\_USD,  
+      r.Tech\_Fee\_Paying ? 'Yes' : 'No'  
+    \];  
+    months.forEach(m \=\> base.push(r.Monthly\[m\] || 0));  
+    return base;  
+  });
+
+  sheet.getRange(1, 1, values.length \+ 1, header.length).setValues(\[header\].concat(values));  
+  sheet.getRange(1, 1, 1, header.length).setFontWeight('bold');  
+  sheet.setFrozenRows(1);  
+  // Optional: Auto-resize might be slow for many columns, consider commenting out if slow  
+  // for (let c \= 1; c \<= header.length; c++) sheet.autoResizeColumn(c);  
 }  
