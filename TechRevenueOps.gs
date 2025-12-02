@@ -453,16 +453,19 @@ function importProjectsData() {
     const data = sourceSh.getDataRange().getValues();
     if (data.length < 2) return 'No data found in external Projects sheet.';
     
-    // Clear existing data but keep headers
-    if (rawSh.getLastRow() > 1) {
-      rawSh.getRange(2, 1, rawSh.getLastRow() - 1, rawSh.getLastColumn()).clearContent();
-    }
+    // Clear entire sheet to ensure clean slate
+    rawSh.clear();
     
-    // Write new data (skip header row from source if we assume row 1 is header)
-    // We'll write all data including headers to be safe, or just data?
-    // Let's write data starting from row 2, assuming source has headers
+    // 1. Write Headers (Force them from Config to ensure "Opportunity" exists)
+    rawSh.getRange(1, 1, 1, cfg.requiredHeaders.length).setValues([cfg.requiredHeaders]).setFontWeight('bold');
+    
+    // 2. Write Data (Skip header row from source, write from Row 2)
     const rows = data.slice(1);
     if (rows.length > 0) {
+      // Ensure we don't write more columns than we have headers for, or handle mismatch?
+      // User implies data exists in Col F. We'll write all columns available in source rows.
+      // Ideally we should slice rows to match header length if source has extra junk, 
+      // but for now let's just write what we got.
       rawSh.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
     }
     
