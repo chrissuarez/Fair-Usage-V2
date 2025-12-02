@@ -307,10 +307,14 @@ function readMasterRowByUid_(uid, techFeeOnly) {
 function refreshRevenueOpsPipeline() {
   const cfg = ensureRevenueOpsConfigTabs();
   ensureShadowTables_();
+  ensureShadowTables_();
   importProjectsData(); // Import fresh project data
 
-  // Build Project lookup map (Opportunity -> {start, end, name})
+  // Clear Debug Sheet at start of pipeline
   const ss = SpreadsheetApp.getActive();
+  const debugSh = getOrCreateSheet_(ss, 'RevenueOps_DEBUG');
+  debugSh.clear();
+  debugSh.appendRow(['Source', 'Stage', 'Message', 'Details']);
   const projSh = ss.getSheetByName(SOURCE_CONFIG.Projects.rawSheet);
   const projectLookup = {};
   if (projSh && projSh.getLastRow() > 1) {
@@ -494,60 +498,101 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
   const ovSh = ss.getSheetByName(cfg.overrideSheet);
   const masterSh = ss.getSheetByName(cfg.masterSheet);
   if (!rawSh || !ovSh || !masterSh) throw new Error(`Missing shadow table for ${cfg.rawSheet}`);
-    
+
+  // DEBUG SETUP
+  const debugSh = getOrCreateSheet_(ss, 'RevenueOps_DEBUG');
+  // debugSh.clear(); // REMOVED: Managed by parent function
+  const debugLog = []; // Start empty, will append
+  const log = (stage, msg, details) => debugLog.push([cfg.rawSheet, stage, msg, typeof details === 'object' ? JSON.stringify(details) : details]);
+
   const headers = rawSh.getRange(1, 1, 1, rawSh.getLastColumn()).getDisplayValues()[0];
+  log('Init', 'Raw Headers Found', headers);
+
   const rawRows = rawSh.getLastRow() > 1 ? 
     rawSh.getRange(2, 1, rawSh.getLastRow() - 1, headers.length).getValues() : [];
   const overrides = readOverrides_(ovSh);
 
   const monthsSet = new Set();
   const masterRows = [];
-  const headerMap = headers.reduce((acc, h, idx) => { acc[h.trim()] = idx; return acc; }, {});
+  
+  // Header Mapping Debug
+  const headerMap = headers.reduce((acc, h, idx) => { 
+    acc[String(h).trim().toLowerCase()] = idx; 
+    return acc; 
+  }, {});
+  
+  const getIdx = (name) => {
+    const key = String(name).trim().toLowerCase();
+    const idx = headerMap[key];
+    if (idx === undefined) log('HeaderMap', 'Missing Header', key);
+    return idx;
+  };
+
+  // Log expected headers vs found indices
+  if (cfg === SOURCE_CONFIG.Estimate) {
+    Object.entries(cfg.fieldMap).forEach(([k, v]) => {
+      log('HeaderMap', `Mapping ${k} -> ${v}`, getIdx(v));
+    });
+  }
 
   // --- PASS 1: Calculate Scaling Factors ---
   const scalingFactors = {}; 
     
   if (cfg === SOURCE_CONFIG.Estimate) {
     const fm = cfg.fieldMap;
-    const oppTotals = {}; // { "Account::OppName": 700000 }
-    const groupUids = {}; // { "Account::OppName": "aCXRN..." }
+    const oppTotals = {}; 
+    const groupUids = {}; 
       
-    // Sum up the raw amounts per Opportunity Group
-    rawRows.forEach(raw => {
-      const acc = safeStr_(raw[headerMap[fm.account]]);
-      const opp = safeStr_(raw[headerMap[fm.opportunity]]);
+    rawRows.forEach((raw, i) => {
+      const acc = safeStr_(raw[getIdx(fm.account)]);
+      const opp = safeStr_(raw[getIdx(fm.opportunity)]);
       const key = `${acc}::${opp}`; 
         
-      const hours = toNumber_(raw[headerMap[fm.hours]]);
-      const rate = toNumber_(raw[headerMap[fm.billRate]]);
+      const hours = toNumber_(raw[getIdx(fm.hours)]);
+      const rate = toNumber_(raw[getIdx(fm.billRate)]);
       
-      // Capture Estimate ID for the group if available
-      const estId = safeStr_(raw[headerMap[fm.estimateId]]);
+      const estId = safeStr_(raw[getIdx(fm.estimateId)]);
       if (estId) groupUids[key] = estId;
         
       if (!oppTotals[key]) oppTotals[key] = 0;
       oppTotals[key] += (hours * rate);
+
+      // Debug specific row (Swarovski check)
+      if (opp.includes('Swarovski')) {
+        log('Pass1', `Row ${i} Data`, { acc, opp, hours, rate, estId });
+      }
     });
 
-    // Check for "Target_Revenue" overrides
+    // Check for "Target_Revenue" OR "Total_USD" overrides
     Object.keys(oppTotals).forEach(key => {
       const parts = key.split('::');
       // Use captured Estimate ID if available, otherwise fallback to hash
       const groupUid = groupUids[key] || generateOpportunityUid_(parts[0], parts[1]); 
       const rawTotal = oppTotals[key];
 
-      if (overrides[groupUid] && overrides[groupUid]['target_revenue']) {
-         const target = Number(overrides[groupUid]['target_revenue']);
-         if (!isNaN(target) && rawTotal > 0) {
-           scalingFactors[key] = target / rawTotal; 
+      // Debug Swarovski Group
+      if (key.includes('Swarovski')) {
+        log('Pass1', 'Group Total', { key, groupUid, rawTotal, override: overrides[groupUid] });
+      }
+
+      const ov = overrides[groupUid];
+      if (ov) {
+         // User might use "Total_USD" or "Target_Revenue"
+         const targetVal = ov['total_usd'] || ov['target_revenue'];
+         if (targetVal) {
+           const target = Number(targetVal);
+           if (!isNaN(target) && rawTotal > 0) {
+             scalingFactors[key] = target / rawTotal; 
+             log('Pass1', 'Scaling Factor Calculated', { key, target, rawTotal, factor: scalingFactors[key] });
+           }
          }
       }
     });
   }
 
   // --- PASS 2: Generate Rows ---
-  rawRows.forEach(raw => {
-    const get = name => raw[headerMap[name]];
+  rawRows.forEach((raw, i) => {
+    const get = name => raw[getIdx(name)];
     let uid = '';
     let account = '';
     let oppName = '';
@@ -579,7 +624,11 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
       hours = toNumber_(get(fm.hours));
       billRate = toNumber_(get(fm.billRate));
 
-      // Project Lookup & Dates Logic
+      // Debug extraction for Swarovski (Removed row limit to see all)
+      if (oppName.includes('Swarovski')) {
+        log('Pass2', `Row ${i} Extraction`, { role, region, hours, billRate, rawRole: get(fm.role), rawRegion: get(fm.region) });
+      }
+
       if (projectLookup && projectLookup[oppName]) {
         startDate = projectLookup[oppName].start;
         endDate = projectLookup[oppName].end;
@@ -594,7 +643,6 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
         
       let rawLineAmount = hours * billRate;
 
-      // Apply Scaling Factor
       const groupKey = `${account}::${oppName}`;
       if (scalingFactors[groupKey]) {
         const factor = scalingFactors[groupKey];
@@ -645,27 +693,61 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
       if (!techFeePaying) debugInfo.push(`Not Paying: Stage="${stage}", Amt=${totalAmount}`);
     }
 
-    const applied = applyOverridesToRow_(
-      {
-        Opportunity_UID: uid,
-        Account: account,
-        Opportunity_Name: oppName,
-        Start_Date: startDate,
-        End_Date: endDate,
-        Currency: currency,
-        Total_Amount: totalAmount,
-        Capability: capability,
-        Tech_Fee_Paying: techFeePaying
-      },
-      overrides[uid]
-    );
-    if (applied) debugInfo.push('Override Applied');
+    // 1. Apply overrides to inputs
+    const rowInputs = {
+      Opportunity_UID: uid,
+      Account: account,
+      Opportunity_Name: oppName,
+      Start_Date: startDate,
+      End_Date: endDate,
+      Currency: currency,
+      Total_Amount: totalAmount,
+      Capability: capability,
+      Tech_Fee_Paying: techFeePaying,
+      Resource_Role: role,
+      Resource_Region: region,
+      Hours: hours,
+      Bill_Rate: billRate
+    };
+    
+    const inputsApplied = applyOverridesToRow_(rowInputs, overrides[uid]);
+    
+    // Update locals from inputs
+    uid = safeStr_(rowInputs.Opportunity_UID);
+    account = safeStr_(rowInputs.Account);
+    oppName = safeStr_(rowInputs.Opportunity_Name);
+    startDate = rowInputs.Start_Date;
+    endDate = rowInputs.End_Date;
+    currency = safeStr_(rowInputs.Currency);
+    totalAmount = toNumber_(rowInputs.Total_Amount);
+    capability = safeStr_(rowInputs.Capability);
+    techFeePaying = !!rowInputs.Tech_Fee_Paying;
+    role = safeStr_(rowInputs.Resource_Role);
+    region = safeStr_(rowInputs.Resource_Region);
+    hours = toNumber_(rowInputs.Hours);
+    billRate = toNumber_(rowInputs.Bill_Rate);
 
+    // 2. Calculate derived USD
     const rate = globalCfg.currencyMap[currency] || 1;
-    const totalUsd = totalAmount * rate;
+    let totalUsd = totalAmount * rate;
+
+    // 3. Apply overrides to outputs (Total_USD) - ONLY for non-Estimate (TechFee) to avoid double-counting scaling factors
+    let outputsApplied = false;
+    if (cfg !== SOURCE_CONFIG.Estimate) {
+      const rowOutputs = { Total_USD: totalUsd };
+      outputsApplied = applyOverridesToRow_(rowOutputs, overrides[uid]);
+      totalUsd = toNumber_(rowOutputs.Total_USD);
+    }
+
+    const applied = inputsApplied || outputsApplied;
+    if (applied) debugInfo.push('Override Applied');
     const monthlyMode = (globalCfg.params.partialMode || 'SIMPLE').toUpperCase();
     const monthly = calculateMonthlyRevenue(totalUsd, startDate, endDate, monthlyMode);
     Object.keys(monthly).forEach(k => monthsSet.add(k));
+
+    if (oppName.includes('Swarovski')) {
+      log('Pass2', 'Pre-Push', { role, region, uid });
+    }
 
     masterRows.push({
       Opportunity_UID: uid,
@@ -689,6 +771,11 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
 
   const months = Array.from(monthsSet).sort();
   writeMasterSheet_(masterSh, masterRows, months, cfg.amountField);
+  
+  // Write Debug Log (Append)
+  if (debugLog.length > 0) {
+    debugSh.getRange(debugSh.getLastRow() + 1, 1, debugLog.length, 4).setValues(debugLog);
+  }
 
   return { rows: masterRows, months };
 }
@@ -699,12 +786,16 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
 function buildCombinedLedger_(estimate, tech) {
   const ss = SpreadsheetApp.getActive();
   const sh = getOrCreateSheet_(ss, 'MASTER_Ledger');
+  const debugSh = ss.getSheetByName('RevenueOps_DEBUG');
 
   const months = mergeMonths_(estimate.months, tech.months);
   const header = ['Opportunity_UID', 'Account', 'Opportunity Name', 'Capability', 'Resource Role', 'Resource Region', 'Hours', 'Bill Rate', 'Start Date', 'End Date', 'Total_USD', 'Tech_Fee_Paying?'].concat(months);
 
   const rows = [];
   estimate.rows.forEach(r => {
+    if (debugSh && r.Opportunity_Name && r.Opportunity_Name.includes('Swarovski')) {
+       debugSh.appendRow(['CombinedLedger', 'Loop', 'Row Check', JSON.stringify({ role: r.Resource_Role, region: r.Resource_Region })]);
+    }
     rows.push(rowToArray_(r, months));
   });
   tech.rows.forEach(r => {
@@ -1027,8 +1118,8 @@ function rowToArray_(row, months) {
     row.Account,
     row.Opportunity_Name,
     row.Capability,
-    row.Role,
-    row.Region,
+    row.Resource_Role,
+    row.Resource_Region,
     row.Hours,
     row.Bill_Rate,
     row.Start_Date,
