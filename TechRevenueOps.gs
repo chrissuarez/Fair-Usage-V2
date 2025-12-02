@@ -309,16 +309,6 @@ function refreshRevenueOpsPipeline() {
   ensureShadowTables_();
   importProjectsData(); // Import fresh project data
 
-  const estimate = rebuildMasterForSource_(SOURCE_CONFIG.Estimate, cfg);
-
-  // Build date lookup map from Estimate rows (Opportunity Name -> {start, end})
-  const dateLookup = {};
-  estimate.rows.forEach(r => {
-    if (r.Opportunity_Name && r.Start_Date) {
-      dateLookup[r.Opportunity_Name] = { start: r.Start_Date, end: r.End_Date };
-    }
-  });
-  
   // Build Project lookup map (Opportunity -> {start, end, name})
   const ss = SpreadsheetApp.getActive();
   const projSh = ss.getSheetByName(SOURCE_CONFIG.Projects.rawSheet);
@@ -346,6 +336,16 @@ function refreshRevenueOpsPipeline() {
     });
   }
 
+  const estimate = rebuildMasterForSource_(SOURCE_CONFIG.Estimate, cfg, null, projectLookup);
+
+  // Build date lookup map from Estimate rows (Opportunity Name -> {start, end})
+  const dateLookup = {};
+  estimate.rows.forEach(r => {
+    if (r.Opportunity_Name && r.Start_Date) {
+      dateLookup[r.Opportunity_Name] = { start: r.Start_Date, end: r.End_Date };
+    }
+  });
+  
   const techFee = rebuildMasterForSource_(SOURCE_CONFIG.TechFee, cfg, dateLookup, projectLookup);
 
   buildCombinedLedger_(estimate, techFee);
