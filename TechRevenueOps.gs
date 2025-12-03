@@ -307,57 +307,106 @@ function readMasterRowByUid_(uid, techFeeOnly) {
 function refreshRevenueOpsPipeline() {
   const cfg = ensureRevenueOpsConfigTabs();
   ensureShadowTables_();
-  ensureShadowTables_();
-  importProjectsData(); // Import fresh project data
+  
+  // 1. Import Data from Emails
+  importOpportunitiesAndAccounts();
+  importProjectsAndOppLookup();
+  importOppsAndCRs();
 
   // Clear Debug Sheet at start of pipeline
   const ss = SpreadsheetApp.getActive();
   const debugSh = getOrCreateSheet_(ss, 'RevenueOps_DEBUG');
   debugSh.clear();
   debugSh.appendRow(['Source', 'Stage', 'Message', 'Details']);
-  const projSh = ss.getSheetByName(SOURCE_CONFIG.Projects.rawSheet);
-  const projectLookup = {};
-  if (projSh && projSh.getLastRow() > 1) {
-    const data = projSh.getDataRange().getValues();
-    const headers = data.shift();
-    const hMap = headers.reduce((acc, h, i) => { acc[h] = i; return acc; }, {});
-    const fm = SOURCE_CONFIG.Projects.fieldMap;
-    
-    data.forEach(r => {
-      const acc = safeStr_(r[hMap[fm.account]]);
-      const start = parseDate_(r[hMap[fm.startDate]]);
-      const end = parseDate_(r[hMap[fm.endDate]]);
-      const name = safeStr_(r[hMap[fm.project]]);
-      const opp = safeStr_(r[hMap[fm.opportunity]]);
-      
-      // Filter: Ignore "OPP_" projects AND "Client Admin & Expense Centre"
-      if (name.toUpperCase().startsWith('OPP_')) return;
-      if (name.indexOf('Client Admin & Expense Centre') !== -1) return;
-
-      // Key by Opportunity Name
-      if (opp && start && end) {
-        projectLookup[opp] = { start, end, name };
-      }
-    });
-  }
-
-  const estimate = rebuildMasterForSource_(SOURCE_CONFIG.Estimate, cfg, null, projectLookup);
-
-  // Build date lookup map from Estimate rows (Opportunity Name -> {start, end})
-  const dateLookup = {};
-  estimate.rows.forEach(r => {
-    if (r.Opportunity_Name && r.Start_Date) {
-      dateLookup[r.Opportunity_Name] = { start: r.Start_Date, end: r.End_Date };
-    }
-  });
   
-  const techFee = rebuildMasterForSource_(SOURCE_CONFIG.TechFee, cfg, dateLookup, projectLookup);
+  // 2. Build Lookups
+  const lookups = buildLookups_(ss);
+
+  const estimate = rebuildMasterForSource_(SOURCE_CONFIG.Estimate, cfg, lookups);
+  const techFee = rebuildMasterForSource_(SOURCE_CONFIG.TechFee, cfg, lookups);
 
   buildCombinedLedger_(estimate, techFee);
   buildPortfolioHealth_(estimate, techFee, cfg);
   buildRenewalRadar_(estimate, techFee, cfg);
 
   return 'Revenue Ops pipeline refreshed (master ledger + dashboards).';
+}
+
+function buildLookups_(ss) {
+  // A. Project Lookup (Opp Name -> Project Details)
+  const projSh = ss.getSheetByName('Projects_RAW_Data_Import');
+  const projectLookup = {}; // Opp Name -> { start, end, name, projectId, oppId }
+  const projectById = {};   // Project ID -> { name, start, end }
+  const projectByOppId = {}; // Opp ID -> { projectId, projectName, start, end }
+
+  if (projSh && projSh.getLastRow() > 1) {
+    const data = projSh.getDataRange().getValues();
+    const headers = data.shift();
+    const hMap = headers.reduce((acc, h, i) => { acc[String(h).trim()] = i; return acc; }, {});
+    
+    // Expected Headers in Projects_RAW_Data_Import:
+    // Project: Project Name, Account, Start Date, End Date, Stage, Opportunity, Project: ID, Opportunity: Opportunity ID
+    
+    data.forEach(r => {
+      const name = safeStr_(r[hMap['Project: Project Name']]);
+      const oppName = safeStr_(r[hMap['Opportunity: Opportunity Name']]); // Note: Check exact header from email import
+      const oppId = safeStr_(r[hMap['Opportunity: Opportunity ID']]);
+      const projId = safeStr_(r[hMap['Project: ID']]);
+      const start = parseDate_(r[hMap['Start Date']]);
+      const end = parseDate_(r[hMap['End Date']]);
+
+      if (name.toUpperCase().startsWith('OPP_')) return;
+      if (name.indexOf('Client Admin & Expense Centre') !== -1) return;
+
+      const account = safeStr_(r[hMap['Account']]); // Capture Account
+      const details = { start, end, name, projectId: projId, oppId, account };
+
+      if (oppName) {
+        projectLookup[oppName] = projectLookup[oppName] || [];
+        projectLookup[oppName].push(details);
+      }
+      if (projId) projectById[projId] = details;
+      if (oppId) {
+        projectByOppId[oppId] = projectByOppId[oppId] || [];
+        projectByOppId[oppId].push(details);
+      }
+    });
+  }
+
+  // B. Estimate -> Opportunity Map
+  const estOppSh = ss.getSheetByName('Estimate_to_Opportunity_Map');
+  const estToOppId = {}; // Estimate ID -> Opportunity ID
+  if (estOppSh && estOppSh.getLastRow() > 1) {
+    const data = estOppSh.getDataRange().getValues();
+    // Headers: Account, Opportunity Name, Estimate Name, Estimate ID, Opportunity ID
+    // Assuming simple column order or map headers dynamically
+    // Let's map dynamically to be safe
+    const headers = data.shift();
+    const hMap = headers.reduce((acc, h, i) => { acc[String(h).trim()] = i; return acc; }, {});
+    
+    data.forEach(r => {
+      const estId = safeStr_(r[hMap['Estimate: ID']]);
+      const oppId = safeStr_(r[hMap['Opportunity: Opportunity ID']]);
+      if (estId && oppId) estToOppId[estId] = oppId;
+    });
+  }
+
+  // C. Opps and CRs (Opp ID -> Parent Opp)
+  const crSh = ss.getSheetByName('Opps_and_CRs_RAW_Import');
+  const oppToParent = {}; // Opp ID -> Parent Opp String (or ID if parsed)
+  if (crSh && crSh.getLastRow() > 1) {
+    const data = crSh.getDataRange().getValues();
+    const headers = data.shift();
+    const hMap = headers.reduce((acc, h, i) => { acc[String(h).trim()] = i; return acc; }, {});
+    
+    data.forEach(r => {
+      const oppId = safeStr_(r[hMap['Opportunity ID']]);
+      const parent = safeStr_(r[hMap['Parent Opportunity']]);
+      if (oppId && parent) oppToParent[oppId] = parent;
+    });
+  }
+
+  return { projectLookup, projectById, projectByOppId, estToOppId, oppToParent };
 }
 
 /**
@@ -492,7 +541,7 @@ function EnsureRevenueOpsShadowTables() {
 /**
  * Rebuild master sheet for a single source, applying overrides, currency conversion, categorization, and monthly spreads.
  */
-function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
+function rebuildMasterForSource_(cfg, globalCfg, lookups) {
   const ss = SpreadsheetApp.getActive();
   const rawSh = ss.getSheetByName(cfg.rawSheet);
   const ovSh = ss.getSheetByName(cfg.overrideSheet);
@@ -500,9 +549,7 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
   if (!rawSh || !ovSh || !masterSh) throw new Error(`Missing shadow table for ${cfg.rawSheet}`);
 
   // DEBUG SETUP
-  const debugSh = getOrCreateSheet_(ss, 'RevenueOps_DEBUG');
-  // debugSh.clear(); // REMOVED: Managed by parent function
-  const debugLog = []; // Start empty, will append
+  const debugLog = []; 
   const log = (stage, msg, details) => debugLog.push([cfg.rawSheet, stage, msg, typeof details === 'object' ? JSON.stringify(details) : details]);
 
   const headers = rawSh.getRange(1, 1, 1, rawSh.getLastColumn()).getDisplayValues()[0];
@@ -515,7 +562,6 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
   const monthsSet = new Set();
   const masterRows = [];
   
-  // Header Mapping Debug
   const headerMap = headers.reduce((acc, h, idx) => { 
     acc[String(h).trim().toLowerCase()] = idx; 
     return acc; 
@@ -528,16 +574,8 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
     return idx;
   };
 
-  // Log expected headers vs found indices
-  if (cfg === SOURCE_CONFIG.Estimate) {
-    Object.entries(cfg.fieldMap).forEach(([k, v]) => {
-      log('HeaderMap', `Mapping ${k} -> ${v}`, getIdx(v));
-    });
-  }
-
   // --- PASS 1: Calculate Scaling Factors ---
   const scalingFactors = {}; 
-    
   if (cfg === SOURCE_CONFIG.Estimate) {
     const fm = cfg.fieldMap;
     const oppTotals = {}; 
@@ -547,43 +585,28 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
       const acc = safeStr_(raw[getIdx(fm.account)]);
       const opp = safeStr_(raw[getIdx(fm.opportunity)]);
       const key = `${acc}::${opp}`; 
-        
       const hours = toNumber_(raw[getIdx(fm.hours)]);
       const rate = toNumber_(raw[getIdx(fm.billRate)]);
-      
       const estId = safeStr_(raw[getIdx(fm.estimateId)]);
+      
+      // Use Estimate ID as group UID if available
       if (estId) groupUids[key] = estId;
         
       if (!oppTotals[key]) oppTotals[key] = 0;
       oppTotals[key] += (hours * rate);
-
-      // Debug specific row (Swarovski check)
-      if (opp.includes('Swarovski')) {
-        log('Pass1', `Row ${i} Data`, { acc, opp, hours, rate, estId });
-      }
     });
 
-    // Check for "Target_Revenue" OR "Total_USD" overrides
     Object.keys(oppTotals).forEach(key => {
       const parts = key.split('::');
-      // Use captured Estimate ID if available, otherwise fallback to hash
       const groupUid = groupUids[key] || generateOpportunityUid_(parts[0], parts[1]); 
       const rawTotal = oppTotals[key];
-
-      // Debug Swarovski Group
-      if (key.includes('Swarovski')) {
-        log('Pass1', 'Group Total', { key, groupUid, rawTotal, override: overrides[groupUid] });
-      }
-
       const ov = overrides[groupUid];
       if (ov) {
-         // User might use "Total_USD" or "Target_Revenue"
          const targetVal = ov['total_usd'] || ov['target_revenue'];
          if (targetVal) {
            const target = Number(targetVal);
            if (!isNaN(target) && rawTotal > 0) {
              scalingFactors[key] = target / rawTotal; 
-             log('Pass1', 'Scaling Factor Calculated', { key, target, rawTotal, factor: scalingFactors[key] });
            }
          }
       }
@@ -604,73 +627,79 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
     let techFeePaying = false;
     let debugInfo = [];
       
-    // New Fields
     let role = '';
     let region = '';
     let hours = 0;
     let billRate = 0;
+    
+    // New Lookup Fields
+    let oppId = '';
+    let projId = '';
+    let projName = '';
 
     if (cfg === SOURCE_CONFIG.Estimate) {
       const fm = cfg.fieldMap;
-    
       account = safeStr_(get(fm.account));
       oppName = safeStr_(get(fm.opportunity));
       const estId = safeStr_(get(fm.estimateId));
-      uid = estId || generateOpportunityUid_(account, oppName);
+      uid = estId || generateOpportunityUid_(account, oppName); // Use Estimate ID as UID
         
-      // Extract new columns
       role = safeStr_(get(fm.role));
       region = safeStr_(get(fm.region));
       hours = toNumber_(get(fm.hours));
       billRate = toNumber_(get(fm.billRate));
 
-      // Debug extraction for Swarovski (Removed row limit to see all)
-      if (oppName.includes('Swarovski')) {
-        log('Pass2', `Row ${i} Extraction`, { role, region, hours, billRate, rawRole: get(fm.role), rawRegion: get(fm.region) });
+      // Resolve Project Details
+      const details = resolveProjectDetails_(estId, oppName, lookups, account);
+      if (details) {
+        oppId = details.oppId;
+        projId = details.projectId;
+        projName = details.projectName;
+        if (details.start) startDate = details.start;
+        if (details.end) endDate = details.end;
+        debugInfo.push(`Project Linked: ${projName}`);
       }
 
-      if (projectLookup && projectLookup[oppName]) {
-        startDate = projectLookup[oppName].start;
-        endDate = projectLookup[oppName].end;
-        debugInfo.push(`Dates from Project: ${projectLookup[oppName].name}`);
-      }
       if (!startDate) {
         startDate = parseDate_(get(fm.startDate));
         endDate = parseDate_(get(fm.endDate));
       }
         
       currency = safeStr_(get(fm.currency)) || 'USD';
-        
       let rawLineAmount = hours * billRate;
-
       const groupKey = `${account}::${oppName}`;
       if (scalingFactors[groupKey]) {
         const factor = scalingFactors[groupKey];
         rawLineAmount = rawLineAmount * factor;
         debugInfo.push(`Scaled by ${(factor*100).toFixed(1)}%`);
       }
-
       totalAmount = rawLineAmount;
       capability = categorizeRevenue(get(fm.role));
       techFeePaying = false;
 
     } else {
-      // Tech Fee Logic
+      // Tech Fee
       const fm = cfg.fieldMap;
       uid = safeStr_(get(fm.opportunityUid)) || generateOpportunityUid_(safeStr_(get(fm.account)), safeStr_(get(fm.opportunity)));
       account = safeStr_(get(fm.account));
       oppName = safeStr_(get(fm.opportunity));
-        
-      if (projectLookup && projectLookup[oppName]) {
-        startDate = projectLookup[oppName].start;
-        endDate = projectLookup[oppName].end;
-        debugInfo.push(`Dates from Project: ${projectLookup[oppName].name}`);
+      oppId = safeStr_(get(fm.opportunityUid));
+
+      // Try to find project by Opp Name or ID
+      if (lookups.projectByOppId[oppId]) {
+        const p = lookups.projectByOppId[oppId];
+        projId = p.projectId;
+        projName = p.name;
+        startDate = p.start;
+        endDate = p.end;
+      } else if (lookups.projectLookup[oppName]) {
+        const p = lookups.projectLookup[oppName];
+        projId = p.projectId;
+        projName = p.name;
+        startDate = p.start;
+        endDate = p.end;
       }
-      if (!startDate && dateLookup && dateLookup[oppName]) {
-        startDate = dateLookup[oppName].start;
-        endDate = dateLookup[oppName].end;
-        debugInfo.push('Dates from Estimate Opp');
-      }
+
       if (!startDate) {
         if (fm.startDate) startDate = parseDate_(get(fm.startDate));
         if (!startDate && fm.closeDate) startDate = parseDate_(get(fm.closeDate));
@@ -681,7 +710,6 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
              d.setFullYear(d.getFullYear() + 1);
              d.setDate(d.getDate() - 1);
              endDate = d;
-             debugInfo.push('Dates Defaulted (1yr)');
            }
         }
       }
@@ -689,11 +717,9 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
       totalAmount = parseCurrency_(get(fm.productAmount));
       capability = safeStr_(get(fm.productName)) || 'Tech Fee';
       techFeePaying = true;
-      const stage = safeStr_(get(fm.stage)).trim().toLowerCase();
-      if (!techFeePaying) debugInfo.push(`Not Paying: Stage="${stage}", Amt=${totalAmount}`);
     }
 
-    // 1. Apply overrides to inputs
+    // 1. Apply overrides
     const rowInputs = {
       Opportunity_UID: uid,
       Account: account,
@@ -707,12 +733,15 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
       Resource_Role: role,
       Resource_Region: region,
       Hours: hours,
-      Bill_Rate: billRate
+      Bill_Rate: billRate,
+      Opportunity_ID: oppId,
+      Project_ID: projId,
+      Project_Name: projName
     };
     
     const inputsApplied = applyOverridesToRow_(rowInputs, overrides[uid]);
     
-    // Update locals from inputs
+    // Update locals
     uid = safeStr_(rowInputs.Opportunity_UID);
     account = safeStr_(rowInputs.Account);
     oppName = safeStr_(rowInputs.Opportunity_Name);
@@ -726,12 +755,15 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
     region = safeStr_(rowInputs.Resource_Region);
     hours = toNumber_(rowInputs.Hours);
     billRate = toNumber_(rowInputs.Bill_Rate);
+    oppId = safeStr_(rowInputs.Opportunity_ID);
+    projId = safeStr_(rowInputs.Project_ID);
+    projName = safeStr_(rowInputs.Project_Name);
 
     // 2. Calculate derived USD
     const rate = globalCfg.currencyMap[currency] || 1;
     let totalUsd = totalAmount * rate;
 
-    // 3. Apply overrides to outputs (Total_USD) - ONLY for non-Estimate (TechFee) to avoid double-counting scaling factors
+    // 3. Apply overrides to outputs
     let outputsApplied = false;
     if (cfg !== SOURCE_CONFIG.Estimate) {
       const rowOutputs = { Total_USD: totalUsd };
@@ -740,24 +772,19 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
     }
 
     const applied = inputsApplied || outputsApplied;
-    if (applied) debugInfo.push('Override Applied');
     const monthlyMode = (globalCfg.params.partialMode || 'SIMPLE').toUpperCase();
     const monthly = calculateMonthlyRevenue(totalUsd, startDate, endDate, monthlyMode);
     Object.keys(monthly).forEach(k => monthsSet.add(k));
 
-    if (oppName.includes('Swarovski')) {
-      log('Pass2', 'Pre-Push', { role, region, uid });
-    }
-
     masterRows.push({
-      Opportunity_UID: uid,
+      Opportunity_UID: uid, // This is Estimate ID for Estimates
       Account: account,
       Opportunity_Name: oppName,
       Capability: capability || (cfg.amountField === 'Revenue' ? 'Other/Shared' : 'Tech Fee'),
-      Resource_Role: role,     // NEW
-      Resource_Region: region, // NEW
-      Hours: hours,            // NEW
-      Bill_Rate: billRate,     // NEW
+      Resource_Role: role,
+      Resource_Region: region,
+      Hours: hours,
+      Bill_Rate: billRate,
       Start_Date: startDate,
       End_Date: endDate,
       Total_USD: totalUsd,
@@ -765,19 +792,79 @@ function rebuildMasterForSource_(cfg, globalCfg, dateLookup, projectLookup) {
       Currency: currency,
       Tech_Fee_Paying: techFeePaying,
       Override_Applied: applied,
-      Debug_Info: debugInfo.join('; ')
+      Debug_Info: debugInfo.join('; '),
+      Opportunity_ID: oppId, // NEW
+      Project_ID: projId,    // NEW
+      Project_Name: projName // NEW
     });
   });
 
   const months = Array.from(monthsSet).sort();
   writeMasterSheet_(masterSh, masterRows, months, cfg.amountField);
   
-  // Write Debug Log (Append)
+  // Write Debug Log
+  const debugSh = getOrCreateSheet_(ss, 'RevenueOps_DEBUG');
   if (debugLog.length > 0) {
     debugSh.getRange(debugSh.getLastRow() + 1, 1, debugLog.length, 4).setValues(debugLog);
   }
 
   return { rows: masterRows, months };
+}
+
+function resolveProjectDetails_(estId, oppName, lookups, account) {
+  // Helper to find best match in a list of projects
+  const findBestMatch = (projects) => {
+    if (!projects || projects.length === 0) return null;
+    if (projects.length === 1) return projects[0]; // If only one, assume it's correct (or check account?)
+    
+    // If multiple, filter by account
+    if (account) {
+      const match = projects.find(p => safeStr_(p.account).toLowerCase() === safeStr_(account).toLowerCase());
+      if (match) return match;
+      // Fuzzy match? e.g. "Converse" vs "Converse EMEA"
+      const fuzzy = projects.find(p => safeStr_(p.account).toLowerCase().includes(safeStr_(account).toLowerCase()) || safeStr_(account).toLowerCase().includes(safeStr_(p.account).toLowerCase()));
+      if (fuzzy) return fuzzy;
+    }
+    return projects[0]; // Fallback to first
+  };
+
+  // 1. Try Estimate ID -> Opportunity ID
+  let oppId = lookups.estToOppId[estId];
+  
+  // 2. If we have Opp ID, check if it has a Parent Opportunity (CR logic)
+  if (oppId && lookups.oppToParent[oppId]) {
+    const parentStr = lookups.oppToParent[oppId];
+    // Parent might be "Name - ID - Name" or just ID. 
+    // Let's try to extract ID if present (regex for 15/18 char ID starting with 006)
+    const idMatch = parentStr.match(/\b006[a-zA-Z0-9]{12,15}\b/);
+    if (idMatch) {
+      const parentId = idMatch[0];
+      if (lookups.projectByOppId[parentId]) {
+        const p = findBestMatch(lookups.projectByOppId[parentId]);
+        if (p) return { projectId: p.projectId, projectName: p.name, oppId: oppId, start: p.start, end: p.end };
+      }
+    } else {
+       // Try lookup by Parent Name (if parentStr is a name)
+       if (lookups.projectLookup[parentStr]) {
+         const p = findBestMatch(lookups.projectLookup[parentStr]);
+         if (p) return { projectId: p.projectId, projectName: p.name, oppId: oppId, start: p.start, end: p.end };
+       }
+    }
+  }
+
+  // 3. If we have Opp ID, check direct Project link
+  if (oppId && lookups.projectByOppId[oppId]) {
+    const p = findBestMatch(lookups.projectByOppId[oppId]);
+    if (p) return { projectId: p.projectId, projectName: p.name, oppId: oppId, start: p.start, end: p.end };
+  }
+
+  // 4. Fallback: Lookup by Opportunity Name
+  if (lookups.projectLookup[oppName]) {
+    const p = findBestMatch(lookups.projectLookup[oppName]);
+    if (p) return { projectId: p.projectId, projectName: p.name, oppId: p.oppId || oppId, start: p.start, end: p.end };
+  }
+
+  return { projectId: '', projectName: '', oppId: oppId || '' };
 }
 
 /**
@@ -789,7 +876,7 @@ function buildCombinedLedger_(estimate, tech) {
   const debugSh = ss.getSheetByName('RevenueOps_DEBUG');
 
   const months = mergeMonths_(estimate.months, tech.months);
-  const header = ['Opportunity_UID', 'Account', 'Opportunity Name', 'Capability', 'Resource Role', 'Resource Region', 'Hours', 'Bill Rate', 'Start Date', 'End Date', 'Total_USD', 'Tech_Fee_Paying?'].concat(months);
+  const header = ['Opportunity_UID', 'Account', 'Opportunity Name', 'Capability', 'Resource Role', 'Resource Region', 'Hours', 'Bill Rate', 'Start Date', 'End Date', 'Total_USD', 'Tech_Fee_Paying?', 'Opportunity_ID', 'Project_ID', 'Project_Name'].concat(months);
 
   const rows = [];
   estimate.rows.forEach(r => {
@@ -1066,18 +1153,21 @@ function categorizeRevenue(roleString) {
 function writeMasterSheet_(sheet, rows, months, amountField) {
   // Updated Header Layout
   const header = [
-    'Opportunity_UID', 
+    amountField === 'Revenue' ? 'Estimate ID' : 'Opportunity_UID', 
     'Account', 
     'Opportunity Name', 
     'Capability', 
-    'Resource Role',    // NEW
-    'Resource Region',  // NEW
-    'Hours',            // NEW
-    'Bill Rate',        // NEW
+    'Resource Role',    
+    'Resource Region',  
+    'Hours',            
+    'Bill Rate',        
     'Start Date', 
     'End Date', 
     'Total_USD', 
-    'Tech_Fee_Paying?'
+    'Tech_Fee_Paying?',
+    'Opportunity_ID', // NEW
+    'Project_ID',     // NEW
+    'Project_Name'    // NEW
   ].concat(months);
 
   sheet.clearContents();
@@ -1092,14 +1182,17 @@ function writeMasterSheet_(sheet, rows, months, amountField) {
       r.Account,
       r.Opportunity_Name,
       r.Capability,
-      r.Resource_Role,    // NEW
-      r.Resource_Region,  // NEW
-      r.Hours,            // NEW
-      r.Bill_Rate,        // NEW
+      r.Resource_Role,    
+      r.Resource_Region,  
+      r.Hours,            
+      r.Bill_Rate,        
       r.Start_Date,
       r.End_Date,
       r.Total_USD,
-      r.Tech_Fee_Paying ? 'Yes' : 'No'
+      r.Tech_Fee_Paying ? 'Yes' : 'No',
+      r.Opportunity_ID, // NEW
+      r.Project_ID,     // NEW
+      r.Project_Name    // NEW
     ];
     months.forEach(m => base.push(r.Monthly[m] || 0));
     return base;
@@ -1108,8 +1201,6 @@ function writeMasterSheet_(sheet, rows, months, amountField) {
   sheet.getRange(1, 1, values.length + 1, header.length).setValues([header].concat(values));
   sheet.getRange(1, 1, 1, header.length).setFontWeight('bold');
   sheet.setFrozenRows(1);
-  // Optional: Auto-resize might be slow for many columns, consider commenting out if slow
-  // for (let c = 1; c <= header.length; c++) sheet.autoResizeColumn(c);
 }
 
 function rowToArray_(row, months) {
@@ -1125,7 +1216,10 @@ function rowToArray_(row, months) {
     row.Start_Date,
     row.End_Date,
     row.Total_USD,
-    row.Tech_Fee_Paying ? 'Yes' : 'No'
+    row.Tech_Fee_Paying ? 'Yes' : 'No',
+    row.Opportunity_ID,
+    row.Project_ID,
+    row.Project_Name
   ];
   months.forEach(m => base.push(row.Monthly[m] || 0));
   return base;
