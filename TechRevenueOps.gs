@@ -391,9 +391,31 @@ function buildLookups_(ss) {
     });
   }
 
-  // C. Opps and CRs (Opp ID -> Parent Opp)
+  // D. Estimate Start Dates (Opp ID -> Earliest Start)
+  const estSh = ss.getSheetByName('Estimate_RAW_Data_Import');
+  const oppStartDates = {}; // Opp ID -> Earliest Start Date
+  if (estSh && estSh.getLastRow() > 1) {
+    const data = estSh.getDataRange().getValues();
+    const headers = data.shift();
+    const hMap = headers.reduce((acc, h, i) => { acc[String(h).trim()] = i; return acc; }, {});
+    
+    // Required: 'Opportunity: Opportunity ID', 'Start Date'
+    data.forEach(r => {
+      const oppId = safeStr_(r[hMap['Opportunity: Opportunity ID']]);
+      const start = parseDate_(r[hMap['Start Date']]);
+      if (oppId && start) {
+        if (!oppStartDates[oppId] || start < oppStartDates[oppId]) {
+          oppStartDates[oppId] = start;
+        }
+      }
+    });
+  }
+
+  // C. Opps and CRs (Opp ID -> Parent Opp) + Parent -> Earliest Child Start
   const crSh = ss.getSheetByName('Opps_and_CRs_RAW_Import');
   const oppToParent = {}; // Opp ID -> Parent Opp String (or ID if parsed)
+  const parentToChildStart = {}; // Parent Opp ID -> Earliest Child Start Date
+  
   if (crSh && crSh.getLastRow() > 1) {
     const data = crSh.getDataRange().getValues();
     const headers = data.shift();
@@ -402,11 +424,25 @@ function buildLookups_(ss) {
     data.forEach(r => {
       const oppId = safeStr_(r[hMap['Opportunity ID']]);
       const parent = safeStr_(r[hMap['Parent Opportunity']]);
-      if (oppId && parent) oppToParent[oppId] = parent;
+      if (oppId && parent) {
+        oppToParent[oppId] = parent;
+        
+        // Extract Parent ID
+        const idMatch = parent.match(/\b006[a-zA-Z0-9]{12,15}\b/);
+        if (idMatch) {
+          const parentId = idMatch[0];
+          const childStart = oppStartDates[oppId];
+          if (childStart) {
+            if (!parentToChildStart[parentId] || childStart < parentToChildStart[parentId]) {
+              parentToChildStart[parentId] = childStart;
+            }
+          }
+        }
+      }
     });
   }
 
-  return { projectLookup, projectById, projectByOppId, estToOppId, oppToParent };
+  return { projectLookup, projectById, projectByOppId, estToOppId, oppToParent, parentToChildStart };
 }
 
 /**
@@ -660,6 +696,28 @@ function rebuildMasterForSource_(cfg, globalCfg, lookups) {
         debugInfo.push(`Project Linked: ${projName}`);
       }
 
+      // --- WATERFALL DATE LOGIC ---
+      // Case A: This is a Change Request (CR)
+      if (lookups.oppToParent[oppId]) {
+        // CRs must ignore Project dates and use Estimate dates
+        startDate = parseDate_(get(fm.startDate));
+        endDate = parseDate_(get(fm.endDate));
+        debugInfo.push('CR Detected: Using Estimate Dates');
+      }
+      // Case B: This is a Parent Opportunity of a CR
+      else if (lookups.parentToChildStart[oppId]) {
+        // Parent ends 1 day before the earliest CR starts
+        const childStart = lookups.parentToChildStart[oppId];
+        const cutoff = new Date(childStart);
+        cutoff.setDate(cutoff.getDate() - 1);
+        
+        // Use Project Start (or fallback), but cap End Date
+        if (!startDate) startDate = parseDate_(get(fm.startDate));
+        endDate = cutoff;
+        debugInfo.push(`Parent of CR: End Date Capped at ${monthKey_(endDate)}`);
+      }
+      // Case C: Standard Project (Fallthrough)
+      
       if (!startDate) {
         startDate = parseDate_(get(fm.startDate));
         endDate = parseDate_(get(fm.endDate));
