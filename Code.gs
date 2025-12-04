@@ -1037,8 +1037,8 @@ function getCashflowData() {
   const data = sh.getDataRange().getValues();
   const headers = data.shift();
 
-  // MASTER_Ledger columns: 0:UID,1:Account,2:Opp Name,3:Capability,4:Start,5:End,6:Total_USD,7:Tech_Fee_Paying?, months start at col 8 (index 8)
-  const monthStartIndex = 8;
+  // MASTER_Ledger columns: 0:UID,1:Account,2:Opp Name,3:Capability,4:Resource Role,5:Resource Region,6:Hours,7:Bill Rate,8:Start,9:End,10:Total_USD,11:Tech_Fee_Paying?,12:OppID,13:ProjID,14:ProjName. Months start at 15.
+  const monthStartIndex = 15;
   const monthKeys = headers.slice(monthStartIndex).map(k => safeStr_(k));
   const monthDates = monthKeys.map(k => {
     const parts = k.split("-");
