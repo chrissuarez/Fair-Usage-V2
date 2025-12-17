@@ -11,3 +11,6 @@ Code.js
 # OS Files
 .DS_Store
 Thumbs.db
+
+# Ignored Folders
+Sheet Structure/

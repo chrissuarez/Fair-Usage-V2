@@ -415,6 +415,7 @@ function buildLookups_(ss) {
   const crSh = ss.getSheetByName('Opps_and_CRs_RAW_Import');
   const oppToParent = {}; // Opp ID -> Parent Opp String (or ID if parsed)
   const parentToChildStart = {}; // Parent Opp ID -> Earliest Child Start Date
+  const oppIdByName = {}; // Opp Name -> Opp ID
   
   if (crSh && crSh.getLastRow() > 1) {
     const data = crSh.getDataRange().getValues();
@@ -424,17 +425,23 @@ function buildLookups_(ss) {
     data.forEach(r => {
       const oppId = safeStr_(r[hMap['Opportunity ID']]);
       const parent = safeStr_(r[hMap['Parent Opportunity']]);
-      if (oppId && parent) {
-        oppToParent[oppId] = parent;
+      const name = safeStr_(r[hMap['Opportunity Name']]);
+
+      if (oppId) {
+        if (name) oppIdByName[name] = oppId; // Map Name -> ID
         
-        // Extract Parent ID
-        const idMatch = parent.match(/\b006[a-zA-Z0-9]{12,15}\b/);
-        if (idMatch) {
-          const parentId = idMatch[0];
-          const childStart = oppStartDates[oppId];
-          if (childStart) {
-            if (!parentToChildStart[parentId] || childStart < parentToChildStart[parentId]) {
-              parentToChildStart[parentId] = childStart;
+        if (parent) {
+          oppToParent[oppId] = parent;
+          
+          // Extract Parent ID
+          const idMatch = parent.match(/\b006[a-zA-Z0-9]{12,15}\b/);
+          if (idMatch) {
+            const parentId = idMatch[0];
+            const childStart = oppStartDates[oppId];
+            if (childStart) {
+              if (!parentToChildStart[parentId] || childStart < parentToChildStart[parentId]) {
+                parentToChildStart[parentId] = childStart;
+              }
             }
           }
         }
@@ -442,7 +449,7 @@ function buildLookups_(ss) {
     });
   }
 
-  return { projectLookup, projectById, projectByOppId, estToOppId, oppToParent, parentToChildStart };
+  return { projectLookup, projectById, projectByOppId, estToOppId, oppToParent, parentToChildStart, oppIdByName, oppNameById: Object.keys(oppIdByName).reduce((acc, name) => { acc[oppIdByName[name]] = name; return acc; }, {}) };
 }
 
 /**
@@ -794,7 +801,8 @@ function rebuildMasterForSource_(cfg, globalCfg, lookups) {
       Bill_Rate: billRate,
       Opportunity_ID: oppId,
       Project_ID: projId,
-      Project_Name: projName
+      Project_Name: projName,
+      Parent_Opportunity: lookups.oppToParent[oppId] || '' // Parent Opportunity Lookup
     };
     
     const inputsApplied = applyOverridesToRow_(rowInputs, overrides[uid]);
@@ -816,6 +824,7 @@ function rebuildMasterForSource_(cfg, globalCfg, lookups) {
     oppId = safeStr_(rowInputs.Opportunity_ID);
     projId = safeStr_(rowInputs.Project_ID);
     projName = safeStr_(rowInputs.Project_Name);
+    const parentOpp = safeStr_(rowInputs.Parent_Opportunity);
 
     // 2. Calculate derived USD
     const rate = globalCfg.currencyMap[currency] || 1;
@@ -853,9 +862,130 @@ function rebuildMasterForSource_(cfg, globalCfg, lookups) {
       Debug_Info: debugInfo.join('; '),
       Opportunity_ID: oppId, // NEW
       Project_ID: projId,    // NEW
-      Project_Name: projName // NEW
+      Project_Name: projName, // NEW
+      Parent_Opportunity: parentOpp // NEW
     });
   });
+
+  // --- PASS 3: Process Orphan Overrides (Tech Fee Only) ---
+  if (cfg !== SOURCE_CONFIG.Estimate) {
+    const visitedUids = new Set(masterRows.map(r => r.Opportunity_UID));
+    const allOverrideUids = Object.keys(overrides);
+    const orphanUids = allOverrideUids.filter(uid => !visitedUids.has(uid));
+
+    orphanUids.forEach(uid => {
+      const ov = overrides[uid];
+      if (!ov) return;
+
+      // Log orphan detection
+      log('Orphan', 'Creating row from override', uid);
+
+      // 1. Attempt to resolve details from Lookups
+      let account = 'Unknown Account';
+      let oppName = 'Unknown Opportunity';
+      let startDate = null;
+      let endDate = null;
+      let oppId = uid; // Assume key is Opp ID 
+      let projId = '';
+      let projName = '';
+
+      // Fix: Try to get Opp Name directly from ID first
+      if (lookups.oppNameById && lookups.oppNameById[uid]) {
+        oppName = lookups.oppNameById[uid];
+      }
+      
+      // Try to find project/opp details by ID (assuming UID is Opportunity ID)
+      if (lookups.projectByOppId[uid]) {
+        const p = lookups.projectByOppId[uid][0]; // Take first match
+        if (p) {
+          account = p.account || account;
+          if (oppName === 'Unknown Opportunity') oppName = p.name || oppName; // Fallback only
+          projId = p.projectId;
+          projName = p.name;
+          startDate = p.start;
+          endDate = p.end;
+        }
+      } else if (lookups.oppToParent[uid]) {
+         // It's a CR? or child?
+         // Try to look up parent details but we really need THIS opp's details.
+         // If we can't find it in projects, maybe we have it in Estimate map?
+      }
+
+      // If still unknown, maybe the override has some clues? (unlikely usually just amount)
+      
+      // 2. Default Values
+      const capability = 'SEO Tech & Tools'; // Requested Default
+      const currency = 'USD';
+      
+      // 3. Construct Row Inputs
+      const rowInputs = {
+        Opportunity_UID: uid,
+        Account: account,
+        Opportunity_Name: oppName,
+        Start_Date: startDate,
+        End_Date: endDate,
+        Currency: currency,
+        Total_Amount: 0,
+        Capability: capability,
+        Tech_Fee_Paying: true,
+        Resource_Role: '',
+        Resource_Region: '',
+        Hours: 0,
+        Bill_Rate: 0,
+        Opportunity_ID: oppId,
+        Project_ID: projId,
+        Project_Name: projName,
+        Parent_Opportunity: lookups.oppToParent[oppId] || ''
+      };
+
+      // 4. Apply Overrides
+      const inputsApplied = applyOverridesToRow_(rowInputs, ov);
+      
+      // Update variables from overrides/inputs
+      const finalRow = {
+        Opportunity_UID: safeStr_(rowInputs.Opportunity_UID),
+        Account: safeStr_(rowInputs.Account),
+        Opportunity_Name: safeStr_(rowInputs.Opportunity_Name),
+        Capability: safeStr_(rowInputs.Capability),
+        Resource_Role: safeStr_(rowInputs.Resource_Role),
+        Resource_Region: safeStr_(rowInputs.Resource_Region),
+        Hours: toNumber_(rowInputs.Hours),
+        Bill_Rate: toNumber_(rowInputs.Bill_Rate),
+        Start_Date: rowInputs.Start_Date,
+        End_Date: rowInputs.End_Date,
+        Total_USD: 0, // Calculated next
+        Monthly: {},
+        Currency: safeStr_(rowInputs.Currency),
+        Tech_Fee_Paying: true,
+        Override_Applied: inputsApplied,
+        Debug_Info: 'Created from Manual Override',
+        Opportunity_ID: safeStr_(rowInputs.Opportunity_ID),
+        Project_ID: safeStr_(rowInputs.Project_ID),
+        Project_Name: safeStr_(rowInputs.Project_Name),
+        Parent_Opportunity: safeStr_(rowInputs.Parent_Opportunity)
+      };
+
+      // 5. Calculate USD (Apply Output Override Logic)
+      // Note: For orphans, typically the input total is 0, so the override IS the total.
+      // But we follow the same pattern: calculate USD from input, then apply output override.
+      
+      const rate = globalCfg.currencyMap[finalRow.Currency] || 1;
+      let totalUsd = toNumber_(rowInputs.Total_Amount) * rate;
+      
+      const rowOutputs = { Total_USD: totalUsd };
+      const outputsApplied = applyOverridesToRow_(rowOutputs, ov);
+      finalRow.Total_USD = toNumber_(rowOutputs.Total_USD);
+      if (outputsApplied) finalRow.Override_Applied = true;
+
+      // 6. Spread Monthly
+      const monthlyMode = (globalCfg.params.partialMode || 'SIMPLE').toUpperCase();
+      const monthly = calculateMonthlyRevenue(finalRow.Total_USD, finalRow.Start_Date, finalRow.End_Date, monthlyMode);
+      finalRow.Monthly = monthly;
+      Object.keys(monthly).forEach(k => monthsSet.add(k));
+
+      masterRows.push(finalRow);
+    });
+  }
 
   const months = Array.from(monthsSet).sort();
   writeMasterSheet_(masterSh, masterRows, months, cfg.amountField);
@@ -888,6 +1018,11 @@ function resolveProjectDetails_(estId, oppName, lookups, account) {
 
   // 1. Try Estimate ID -> Opportunity ID
   let oppId = lookups.estToOppId[estId];
+
+  // 1b. Fallback: Try Opportunity Name -> Opportunity ID
+  if (!oppId && lookups.oppIdByName && lookups.oppIdByName[oppName]) {
+    oppId = lookups.oppIdByName[oppName];
+  }
   
   // 2. If we have Opp ID, check if it has a Parent Opportunity (CR logic)
   if (oppId && lookups.oppToParent[oppId]) {
@@ -934,7 +1069,7 @@ function buildCombinedLedger_(estimate, tech) {
   const debugSh = ss.getSheetByName('RevenueOps_DEBUG');
 
   const months = mergeMonths_(estimate.months, tech.months);
-  const header = ['Opportunity_UID', 'Account', 'Opportunity Name', 'Capability', 'Resource Role', 'Resource Region', 'Hours', 'Bill Rate', 'Start Date', 'End Date', 'Total_USD', 'Tech_Fee_Paying?', 'Opportunity_ID', 'Project_ID', 'Project_Name'].concat(months);
+  const header = ['Estimate ID', 'Account', 'Opportunity Name', 'Parent Opportunity', 'Capability', 'Resource Role', 'Resource Region', 'Hours', 'Bill Rate', 'Start Date', 'End Date', 'Total_USD', 'Tech_Fee_Paying?', 'Opportunity_ID', 'Project_ID', 'Project_Name'].concat(months);
 
   const rows = [];
   estimate.rows.forEach(r => {
@@ -1211,9 +1346,10 @@ function categorizeRevenue(roleString) {
 function writeMasterSheet_(sheet, rows, months, amountField) {
   // Updated Header Layout
   const header = [
-    amountField === 'Revenue' ? 'Estimate ID' : 'Opportunity_UID', 
+    'Estimate ID', // Fixed Header as requested
     'Account', 
     'Opportunity Name', 
+    'Parent Opportunity', // NEW Column D (shifts others)
     'Capability', 
     'Resource Role',    
     'Resource Region',  
@@ -1239,6 +1375,7 @@ function writeMasterSheet_(sheet, rows, months, amountField) {
       r.Opportunity_UID,
       r.Account,
       r.Opportunity_Name,
+      r.Parent_Opportunity, // Map new column
       r.Capability,
       r.Resource_Role,    
       r.Resource_Region,  
@@ -1266,6 +1403,7 @@ function rowToArray_(row, months) {
     row.Opportunity_UID,
     row.Account,
     row.Opportunity_Name,
+    row.Parent_Opportunity, // Add to combined ledger
     row.Capability,
     row.Resource_Role,
     row.Resource_Region,
