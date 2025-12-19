@@ -12,6 +12,7 @@ function onOpen() {
     .addItem('Create Revenue Ops Shadow Tables', 'EnsureRevenueOpsShadowTables')
     .addItem('Refresh Revenue Ops Pipeline', 'refreshRevenueOpsPipeline')
     .addItem('Setup Revenue Ops Config Tabs', 'ensureRevenueOpsConfigTabs')
+    .addItem('Import JF Buy Data', 'importJFBuyData')
     .addToUi();
 
   ui
