@@ -143,34 +143,81 @@ function generatePnLDashboard() {
 // --- HELPERS ---
 
 function getRevenueMap_(ss, sheetName) {
-  // Use "Upgrade Predictor" as source for confirmed revenue
-  const dash = ss.getSheetByName("Upgrade Predictor");
-  if (!dash) {
-    console.warn("Upgrade Predictor sheet not found. Skipping revenue.");
+  // Use "MASTER_Ledger" as source for full SEO revenue
+  const ledger = ss.getSheetByName("MASTER_Ledger");
+  if (!ledger) {
+    console.warn("MASTER_Ledger sheet not found. Skipping revenue.");
     return {};
   }
   
-  const startRow = 11;
-  const lastCol = dash.getLastColumn();
-  if (lastCol < 2) {
-    console.warn("Upgrade Predictor seems empty. Skipping revenue.");
+  const data = ledger.getDataRange().getValues();
+  if (data.length < 2) {
+    console.warn("MASTER_Ledger seems empty. Skipping revenue.");
     return {};
   }
   
-  // Safe getRange
-  const headers = dash.getRange(startRow, 2, 1, lastCol - 1).getValues()[0]; // Dates
-  const confirmed = dash.getRange(startRow + 2, 2, 1, lastCol - 1).getValues()[0];
-  const pipeline = dash.getRange(startRow + 3, 2, 1, lastCol - 1).getValues()[0];
+  const headers = data[0];
+  const monthsSet = new Set();
+  const monthCols = [];
   
-  const map = {};
-  headers.forEach((d, i) => {
-    if (d instanceof Date) {
-      const key = `${d.getFullYear()}-${d.getMonth()}`;
-      const val = (Number(confirmed[i]) || 0) + (Number(pipeline[i]) || 0);
-      map[key] = val;
+  // Identify month columns (format yyyy-mm)
+  headers.forEach((h, i) => {
+    const hs = String(h);
+    if (/^\d{4}-\d{2}$/.test(hs)) {
+      monthCols.push({ idx: i, key: hs });
+      monthsSet.add(hs);
     }
   });
+
+  if (monthCols.length === 0) {
+    console.warn("No month columns found in MASTER_Ledger.");
+    return {};
+  }
+  
+  const map = {};
+  // Sum each month column across all rows
+  for (let r = 1; r < data.length; r++) {
+    const row = data[r];
+    monthCols.forEach(m => {
+      const val = Number(row[m.idx]) || 0;
+      map[m.key] = (map[m.key] || 0) + val;
+    });
+  }
+
+  // Convert "2025-01" keys to "2025-0" format used by sumYear_ if necessary
+  // Standardizing on "yyyy-MM" (e.g. 2025-01) for consistency with TechRevenueOps.gs
   return map;
+}
+
+// Update sumYear_ to handle both "2025-0" and "2025-01" formats
+function sumYear_(map, year) {
+  let sum = 0;
+  Object.keys(map).forEach(k => {
+    // Matches "2025-0", "2025-1", "2025-01", etc.
+    if (k.startsWith(`${year}-`)) {
+      sum += map[k];
+    }
+  });
+  return sum;
+}
+
+// Standardize getMonthKeys_ to use "yyyy-MM" to match MASTER_Ledger
+function getMonthKeys_() {
+  const start = new Date(2025, 0, 1);
+  const end = new Date(2026, 11, 31);
+  const list = [];
+  let cur = new Date(start);
+  while (cur <= end) {
+    // Match yyyy-MM
+    const mk = Utilities.formatDate(cur, Session.getScriptTimeZone(), "yyyy-MM");
+    list.push({
+      key: mk,
+      toString: function() { return this.key; },
+      label: Utilities.formatDate(cur, Session.getScriptTimeZone(), "MMM-yy")
+    });
+    cur.setMonth(cur.getMonth() + 1);
+  }
+  return list;
 }
 
 function getToolCostMap_(ss, sheetName) {
@@ -321,8 +368,9 @@ function getMonthKeys_() {
   const list = [];
   let cur = new Date(start);
   while (cur <= end) {
+    const mk = Utilities.formatDate(cur, Session.getScriptTimeZone(), "yyyy-MM");
     list.push({
-      key: `${cur.getFullYear()}-${cur.getMonth()}`,
+      key: mk,
       toString: function() { return this.key; },
       label: Utilities.formatDate(cur, Session.getScriptTimeZone(), "MMM-yy")
     });
