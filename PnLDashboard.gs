@@ -131,6 +131,9 @@ function generatePnLDashboard() {
     sheet.autoResizeColumns(1, 10);
     SpreadsheetApp.getUi().alert("P&L Dashboard Generated Successfully.");
 
+    // --- DEBUG SHEET ---
+    generateFreelancerDebugSheet_(ss, freelancerMap.debugRows);
+
   } catch (e) {
     console.error("Error generating P&L Dashboard: " + e.stack);
     SpreadsheetApp.getUi().alert("Error generating P&L Dashboard: " + e.message);
@@ -253,9 +256,40 @@ function getFreelancerMap_(ss, sheetName) {
     
     const key = `${d.getFullYear()}-${d.getMonth()}`;
     map[key] = (map[key] || 0) + cost;
+
+    if (!map.debugRows) map.debugRows = [];
+    map.debugRows.push([
+      d, 
+      row[headers.indexOf("Vendor")] || "", 
+      row[headers.indexOf("Description")] || row[headers.indexOf("Request_Description")] || "",
+      row[statusCol] || "",
+      cost,
+      key
+    ]);
   }
   
   return map;
+}
+
+function generateFreelancerDebugSheet_(ss, rows) {
+  if (!rows || rows.length === 0) return;
+  
+  const SHEET_NAME = "Debug - Freelancer Breakdown";
+  let sheet = ss.getSheetByName(SHEET_NAME);
+  if (sheet) sheet.clear();
+  else sheet = ss.insertSheet(SHEET_NAME);
+  
+  const headers = ["Date", "Vendor", "Description", "Status", "Amount (USD)", "MonthKey"];
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight("bold");
+  
+  // Sort by date
+  rows.sort((a, b) => a[0] - b[0]);
+  
+  sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
+  sheet.getRange(2, 1, rows.length, 1).setNumberFormat("yyyy-mm-dd");
+  sheet.getRange(2, 5, rows.length, 1).setNumberFormat("$#,##0.00");
+  sheet.setFrozenRows(1);
+  sheet.autoResizeColumns(1, 6);
 }
 
 function sumYear_(map, year) {
