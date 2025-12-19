@@ -228,6 +228,7 @@ function getFreelancerMap_(ss, sheetName) {
   const costCol = headers.indexOf("POAmount_USD");
   const dateCol2 = headers.indexOf("Request_Date");
   const statusCol = headers.indexOf("Status");
+  const productCol = headers.indexOf("Product");
   
   if (costCol === -1) {
     console.warn(`Column POAmount_USD not found in ${sheetName}.`);
@@ -254,6 +255,11 @@ function getFreelancerMap_(ss, sheetName) {
       if (status.includes("cancelled") || status.includes("rejected")) continue;
     }
     
+    const product = (productCol !== -1) ? String(row[productCol]).trim() : "";
+    
+    // EXCLUDE TOOL COSTS (Product = "Digital PR - Tech")
+    if (product === "Digital PR - Tech") continue;
+
     const key = `${d.getFullYear()}-${d.getMonth()}`;
     map[key] = (map[key] || 0) + cost;
 
@@ -262,6 +268,7 @@ function getFreelancerMap_(ss, sheetName) {
       d, 
       row[headers.indexOf("Vendor")] || "", 
       row[headers.indexOf("Description")] || row[headers.indexOf("Request_Description")] || "",
+      product,
       row[statusCol] || "",
       cost,
       key
@@ -279,7 +286,7 @@ function generateFreelancerDebugSheet_(ss, rows) {
   if (sheet) sheet.clear();
   else sheet = ss.insertSheet(SHEET_NAME);
   
-  const headers = ["Date", "Vendor", "Description", "Status", "Amount (USD)", "MonthKey"];
+  const headers = ["Date", "Vendor", "Description", "Product", "Status", "Amount (USD)", "MonthKey"];
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight("bold");
   
   // Sort by date
@@ -287,9 +294,9 @@ function generateFreelancerDebugSheet_(ss, rows) {
   
   sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
   sheet.getRange(2, 1, rows.length, 1).setNumberFormat("yyyy-mm-dd");
-  sheet.getRange(2, 5, rows.length, 1).setNumberFormat("$#,##0.00");
+  sheet.getRange(2, 6, rows.length, 1).setNumberFormat("$#,##0.00");
   sheet.setFrozenRows(1);
-  sheet.autoResizeColumns(1, 6);
+  sheet.autoResizeColumns(1, 7);
 }
 
 function sumYear_(map, year) {
