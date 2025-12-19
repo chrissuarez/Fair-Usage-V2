@@ -257,8 +257,16 @@ function getFreelancerMap_(ss, sheetName) {
     
     const product = (productCol !== -1) ? String(row[productCol]).trim() : "";
     
-    // EXCLUDE TOOL COSTS (Product = "Digital PR - Tech")
-    if (product === "Digital PR - Tech") continue;
+    // EXCLUDE TOOL COSTS & VENDOR COSTS
+    const excludedProducts = [
+      "Digital PR - Tech", 
+      "Software Licenses", 
+      "SEO - Vendor", 
+      "Digital PR - Vendor", 
+      "SEO Content - Vendor"
+    ];
+    
+    if (excludedProducts.includes(product)) continue;
 
     const key = `${d.getFullYear()}-${d.getMonth()}`;
     map[key] = (map[key] || 0) + cost;
