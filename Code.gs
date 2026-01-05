@@ -4,20 +4,28 @@
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
 
-  ui
-    .createMenu('Tech Fee Tools')
+  // Menu 1: Fair Usage & Revenue Ops (Core)
+  ui.createMenu('Fair Usage Tools')
     .addItem('Build Tech Fee Join', 'Build_Tech_Fee_Join')
     .addItem('Refresh Fair-Usage Table', 'Build_FairUsage_ForYear')
     .addItem('Create/Update Setup Tab', 'EnsureSetupTab_')
+    .addSeparator()
     .addItem('Create Revenue Ops Shadow Tables', 'EnsureRevenueOpsShadowTables')
-    .addItem('Refresh Revenue Ops Pipeline', 'refreshRevenueOpsPipeline')
     .addItem('Setup Revenue Ops Config Tabs', 'ensureRevenueOpsConfigTabs')
+    .addItem('Refresh Revenue Ops Pipeline', 'refreshRevenueOpsPipeline')
     .addItem('Import JF Buy Data', 'importJFBuyData')
     .addToUi();
 
-  ui
-    .createMenu('Cashflow Tools')
-    .addItem('Generate Tech Run Rate', 'generateTechRunRate')
+  // Menu 2: Tech Finance Admin (Dashboards & Advanced)
+  ui.createMenu('Tech Finance Admin')
+    .addItem('Run Full Update (Step 1 & 2)', 'runFullUpdate') // From TechFinanceTool.gs
+    .addSeparator()
+    .addItem('Step 1: Generate Data Engine', 'generateTechRunRate')
+    .addItem('Step 2: Build Dashboard', 'buildDashboard')
+    .addItem('Generate Tool Cost Timeline', 'buildToolCostTimeline')
+    .addSeparator()
+    .addItem('Create Tool Transactions Tab', 'ensureToolTransactionsTab')
+    .addItem('Generate P&L Dashboard', 'generatePnLDashboard')
     .addToUi();
 }
 

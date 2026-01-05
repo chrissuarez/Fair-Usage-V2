@@ -3,26 +3,7 @@
  * Contains all logic to generate the Data Engine and Dashboard.
  */
 
-function onOpen() {
-  const ui = SpreadsheetApp.getUi();
-  ui.createMenu('Tech Finance Admin')
-    .addItem('Run Full Update (Step 1 & 2)', 'runFullUpdate')
-    .addSeparator()
-    .addItem('Step 1: Generate Data Engine', 'generateTechRunRate')
-    .addItem('Step 2: Build Dashboard', 'buildDashboard')
-    .addItem('Generate Tool Cost Timeline', 'buildToolCostTimeline')
-    .addSeparator()
-    .addItem('Create Tool Transactions Tab', 'ensureToolTransactionsTab')
-    .addSeparator()
-    .addItem('Create Revenue Ops Shadow Tables', 'EnsureRevenueOpsShadowTables')
-    .addItem('Setup Revenue Ops Config Tabs', 'ensureRevenueOpsConfigTabs')
-    .addItem('Refresh Revenue Ops Pipeline', 'refreshRevenueOpsPipeline')
-    .addSeparator()
-    .addItem('Import JF Buy Data', 'importJFBuyData')
-    .addSeparator()
-    .addItem('Generate P&L Dashboard', 'generatePnLDashboard')
-    .addToUi();
-}
+// onOpen moved to Code.gs
 
 function runFullUpdate() {
   try {
